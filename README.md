@@ -28,10 +28,10 @@ RF-Vision-UAV-Tracker
 
 ```text
 SkySentinel-Edge/
-├── 📁 rf_zynq/             # 射频基带组代码 (FPGA工程, ARM裸机/FreeRTOS网络发送)
-├── 📁 vision_k230/         # 视觉AI组代码 (YOLO训练脚本, K230端侧推理与推流代码)
-├── 📁 backend_rk3588/      # 主控逻辑组代码 (多模态融合判定引擎, 并发接收线程)
-├── 📁 ui_qt/               # 上位机监控组代码 (纯C++ Qt工程, UI界面, QCustomPlot图表)
-├── 📁 database/            # 数据库组代码 (MySQL建表SQL脚本, 自动化运维脚本)
-├── 📁 docs/                # 项目文档 (V4.0技术文档, 硬件BOM表, 原理图PDF)
+├── 📁 rf_zynq/             # 射频基带组代码
+├── 📁 vision_k230/         # 视觉AI组代码
+├── 📁 backend_rk3588/      # 主控逻辑组代码
+├── 📁 ui_qt/               # 上位机监控组代码
+├── 📁 database/            # 数据库组代码
+├── 📁 docs/                # 项目文档
 └── 📄 README.md            # 项目说明文件
