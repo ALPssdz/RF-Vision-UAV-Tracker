@@ -27,7 +27,8 @@ RF-Vision-UAV-Tracker
 为了保证 8 人团队的代码不产生冲突，本仓库采用模块化目录管理：
 
 ```text
-SkySentinel-Edge/
+
+RF-Vision-UAV-Tracker/
 ├── 📁 rf_zynq/             # 射频基带组代码
 ├── 📁 vision_k230/         # 视觉AI组代码
 ├── 📁 backend_rk3588/      # 主控逻辑组代码
