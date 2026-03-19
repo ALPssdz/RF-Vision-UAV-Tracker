@@ -1,5 +1,5 @@
-RF-Vision-UAV-Tracker
-**多模态无人机监测与预警系统 (基于分布式边缘计算架构)**
+# 📡 RF-Vision-UAV-Tracker
+**基于多模态融合 (射频 + 边缘视觉) 的无人机监测与预警系统**
 
 ![C++](https://img.shields.io/badge/C++-11%2F14-blue.svg)
 ![Qt](https://img.shields.io/badge/Qt-5.15%2B-green.svg)
@@ -13,13 +13,13 @@ RF-Vision-UAV-Tracker
 
 ## ⚙️ 核心硬件架构
 系统由三个高度解耦的物理节点构成，通过 5 口千兆工业级交换机实现高速互联：
-* **📻 射频感知节点 (ZYNQ7020 + AD9363)**：负责底层电磁环境扫描，利用 FPGA 进行高速 FFT 频谱分析，通过 UDP 协议低延迟外发频域特征。
+* **📻 射频感知节点 (PlutoSDR: ZYNQ7020 + AD9363)**：基于 PlutoSDR 自带的嵌入式 Linux 系统开发。利用系统底层函数与 API 驱动 AD9363 进行环境扫描与频谱特征提取，依托 Linux 标准网络栈通过 UDP 协议向外低延迟发送特征数据。
 * **👁️ 视觉感知节点 (Kendryte K230)**：部署轻量级 YOLO 模型，利用 KPU 硬件加速实现目标检测，同步输出 JSON 语义结果与硬件压缩的高清实时视频流。
 * **🧠 中央主控与数据平台 (RK3588)**：配备 8GB RAM 与 128G NVMe SSD。运行完整版 Ubuntu，负责多路并发数据接收、时空对齐融合判定、MySQL 数据持久化及运行高性能 C++ Qt 上位机监控界面。
 
 ## 🛠️ 技术栈
 * **主控与上位机 (C++ / Qt)**：原生 Qt5/Qt6、QCustomPlot (极速瀑布图渲染)、OpenCV C++ (视频流解码)。
-* **射频底层 (FPGA / C)**：Vivado / Vitis、LwIP 网络协议栈、FFT IP核。
+* **射频底层 (Linux / C/C++)**：PlutoSDR 嵌入式 Linux 环境、libiio 工业 I/O 库、Linux Socket 编程 (UDP 通信)。
 * **视觉算法 (Python / C)**：PyTorch (模型训练)、K230 KPU SDK (模型量化与部署)、流媒体推流协议。
 * **数据存储 (SQL)**：MySQL (读写分离、高频并发落盘)。
 
@@ -27,12 +27,11 @@ RF-Vision-UAV-Tracker
 为了保证 8 人团队的代码不产生冲突，本仓库采用模块化目录管理：
 
 ```text
-
 RF-Vision-UAV-Tracker/
-├── 📁 rf_zynq/             # 射频基带组代码
-├── 📁 vision_k230/         # 视觉AI组代码
-├── 📁 backend_rk3588/      # 主控逻辑组代码
-├── 📁 ui_qt/               # 上位机监控组代码
-├── 📁 database/            # 数据库组代码
-├── 📁 docs/                # 项目文档
+├── 📁 rf_plutosdr/         # 射频基带组代码 (基于 PlutoSDR Linux 环境与系统函数)
+├── 📁 vision_k230/         # 视觉AI组代码 (YOLO训练脚本, K230端侧推理与推流代码)
+├── 📁 backend_rk3588/      # 主控逻辑组代码 (多模态融合判定引擎, 并发接收线程)
+├── 📁 ui_qt/               # 上位机监控组代码 (纯C++ Qt工程, UI界面, QCustomPlot图表)
+├── 📁 database/            # 数据库组代码 (MySQL建表SQL脚本, 自动化运维脚本)
+├── 📁 docs/                # 项目文档 (V4.0技术文档, 硬件BOM表, 原理图PDF)
 └── 📄 README.md            # 项目说明文件
