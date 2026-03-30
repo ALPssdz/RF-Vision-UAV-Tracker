@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RF-Vision-UAV-Tracker | 实时快照版</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        body { background-color: #020617; color: #cbd5e1; overflow: hidden; font-family: ui-sans-serif, system-ui, sans-serif; }
+        .scrollbar-hide::-webkit-scrollbar { display: none; }
+        .waterfall-canvas { image-rendering: pixelated; }
+        @keyframes custom-bounce {
+            0%, 100% { transform: translateY(-5%) translateX(-50%); }
+            50% { transform: translateY(0) translateX(-50%); }
+        }
+        .animate-alert { animation: custom-bounce 1s infinite; }
+        .scanline {
+            width: 100%;
+            height: 2px;
+            background: rgba(244, 63, 94, 0.2);
+            position: absolute;
+            animation: scan 3s linear infinite;
+            z-index: 5;
+            pointer-events: none;
+        }
+        @keyframes scan {
+            from { top: 0; }
+            to { top: 100%; }
+        }
+    </style>
+</head>
+<body class="h-screen flex flex-col">
+
+    <!-- 顶部状态栏 -->
+    <header class="flex items-center justify-between bg-slate-900 border-b border-slate-800 p-3 shadow-md z-50">
+        <div class="flex items-center text-cyan-400 font-bold text-lg tracking-wider">
+            <i data-lucide="shield-alert" class="w-6 h-6 mr-2 animate-pulse"></i>
+            RF-Vision-UAV-Tracker <span class="ml-2 text-[10px] bg-cyan-500/10 text-cyan-400 px-2 py-0.5 rounded border border-cyan-500/20">REALTIME_V3</span>
+        </div>
+        <div class="flex items-center space-x-4">
+            <button onclick="clearStorage()" class="text-[10px] text-slate-500 hover:text-rose-400 transition-colors flex items-center">
+                <i data-lucide="trash-2" class="w-3 h-3 mr-1"></i> 清空存储
+            </button>
+            <div class="flex items-center space-x-2 bg-slate-950 px-4 py-1.5 rounded-md border border-slate-800 shadow-inner">
+                <i data-lucide="clock" class="w-4 h-4 text-cyan-500 mr-1"></i>
+                <span id="current-time" class="font-mono text-cyan-500 text-lg">00:00:00</span>
+            </div>
+        </div>
+    </header>
+
+    <div class="flex flex-1 overflow-hidden">
+        <!-- 侧边导航栏 -->
+        <nav class="w-16 bg-slate-900 border-r border-slate-800 flex flex-col items-center py-6 space-y-6">
+            <button onclick="switchView('dashboard')" id="nav-dashboard" class="p-3 rounded-lg bg-cyan-500 text-white shadow-[0_0_15px_rgba(6,182,212,0.5)] transition-all">
+                <i data-lucide="activity" class="w-5 h-5"></i>
+            </button>
+            <button onclick="switchView('history')" id="nav-history" class="p-3 rounded-lg text-slate-500 hover:bg-slate-800 transition-all relative">
+                <i data-lucide="history" class="w-5 h-5"></i>
+                <span id="history-badge" class="absolute top-1 right-1 w-2 h-2 bg-rose-500 rounded-full hidden"></span>
+            </button>
+        </nav>
+
+        <!-- 主显示区 -->
+        <main id="main-content" class="flex-1 p-4 overflow-hidden relative">
+            <div id="view-dashboard" class="grid grid-cols-12 grid-rows-12 gap-4 h-full">
+                <!-- 视觉监控 -->
+                <section id="viz-container" class="col-span-12 lg:col-span-6 row-span-7 bg-slate-900 border border-rose-600/50 rounded-xl overflow-hidden relative shadow-[0_0_20px_rgba(225,29,72,0.2)]">
+                    <div class="scanline"></div>
+                    <div class="absolute top-14 left-1/2 -translate-x-1/2 z-10 bg-rose-600 text-white px-6 py-2 rounded-full text-sm font-bold flex items-center animate-alert shadow-lg border border-rose-400/50">
+                        <i data-lucide="eye" class="w-4 h-4 mr-2"></i> 警告：检测到可疑无人机
+                    </div>
+                    <div class="flex items-center justify-between p-3 bg-slate-800/80 border-b border-slate-800 z-10 relative">
+                        <div class="flex items-center text-slate-200 font-medium text-sm">
+                            <i data-lucide="camera" class="w-4 h-4 mr-2 text-rose-400"></i> 视觉侦测链路
+                        </div>
+                        <button onclick="capture('视觉识别')" class="flex items-center space-x-1 text-[10px] bg-rose-600/20 text-rose-400 border border-rose-500/30 px-2 py-1 rounded hover:bg-rose-600/40 transition-colors">
+                            <i data-lucide="save" class="w-3 h-3"></i> <span>抓拍存证</span>
+                        </button>
+                    </div>
+                    <div id="vision-screen" class="flex-1 h-full bg-black relative flex justify-center items-center">
+                        <div class="absolute inset-0 opacity-20 pointer-events-none" style="background-image: radial-gradient(#f43f5e 1px, transparent 1px); background-size: 20px 20px;"></div>
+                        <div class="w-64 h-48 border-2 border-rose-500 relative bg-rose-500/5">
+                            <div class="absolute -top-8 left-0">
+                                <span class="bg-rose-600 text-white text-[10px] px-2 py-0.5 font-bold uppercase">Target Locked</span>
+                            </div>
+                            <div class="absolute inset-0 flex items-center justify-center">
+                                <i data-lucide="crosshair" class="text-rose-500/50 w-24 h-24"></i>
+                            </div>
+                            <div class="absolute bottom-2 left-2 text-[8px] text-rose-400 font-mono">DIST: 124m<br>ALT: 45m</div>
+                            <div class="absolute top-2 right-2 text-[8px] text-rose-400 font-mono">TRK: 359°</div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- 射频监控 -->
+                <section class="col-span-12 lg:col-span-6 row-span-7 bg-slate-900 border border-fuchsia-600/50 rounded-xl overflow-hidden relative shadow-[0_0_20px_rgba(192,38,211,0.2)]">
+                    <!-- 新增的射频警告提示框 -->
+                    <div class="absolute top-14 left-1/2 -translate-x-1/2 z-10 bg-fuchsia-600 text-white px-6 py-2 rounded-full text-sm font-bold flex items-center animate-alert shadow-lg border border-fuchsia-400/50">
+                        <i data-lucide="zap" class="w-4 h-4 mr-2"></i> 警告：检测到非法频率占用
+                    </div>
+                    
+                    <div class="flex items-center justify-between p-3 bg-slate-800/80 border-b border-slate-800 z-10 relative">
+                        <div class="flex items-center text-slate-200 font-medium text-sm">
+                            <i data-lucide="radio" class="w-4 h-4 mr-2 text-fuchsia-400"></i> 频谱侦测链路 (OFDM)
+                        </div>
+                        <button onclick="capture('频谱侦测')" class="flex items-center space-x-1 text-[10px] bg-fuchsia-600/20 text-fuchsia-400 border border-fuchsia-500/30 px-2 py-1 rounded hover:bg-fuchsia-600/40 transition-colors">
+                            <i data-lucide="save" class="w-3 h-3"></i> <span>频谱快照</span>
+                        </button>
+                    </div>
+                    <div class="flex-1 h-full bg-slate-950 p-1 overflow-hidden">
+                        <canvas id="sdr-canvas" class="w-full h-full waterfall-canvas"></canvas>
+                    </div>
+                </section>
+
+                <!-- 存证列表 -->
+                <section class="col-span-12 lg:col-span-7 row-span-5 bg-slate-900 border border-slate-800 rounded-xl overflow-hidden flex flex-col">
+                    <div class="flex items-center justify-between p-3 bg-slate-800/40 border-b border-slate-800">
+                        <div class="flex items-center text-slate-200 font-medium text-sm">
+                            <i data-lucide="hard-drive" class="w-4 h-4 mr-2 text-cyan-500"></i> 持久化存证库
+                        </div>
+                    </div>
+                    <div id="history-list" class="flex-1 overflow-y-auto p-2 bg-slate-900/50 space-y-2">
+                    </div>
+                </section>
+
+                <!-- 运行日志 -->
+                <section class="col-span-12 lg:col-span-5 row-span-5 bg-slate-950 border border-slate-800 rounded-xl overflow-hidden flex flex-col font-mono text-[10px]">
+                    <div class="p-2 bg-slate-900 border-b border-slate-800 text-slate-400 flex items-center">
+                        <i data-lucide="terminal" class="w-3 h-3 mr-2"></i> 系统日志
+                    </div>
+                    <div id="log-container" class="flex-1 p-2 overflow-y-auto space-y-1 scrollbar-hide"></div>
+                </section>
+            </div>
+
+            <!-- History 视图 -->
+            <div id="view-history" class="hidden h-full bg-slate-900 border border-slate-800 rounded-2xl p-6 flex flex-col shadow-2xl">
+                <div class="flex items-center justify-between mb-8 border-b border-slate-800 pb-4">
+                    <h2 class="text-xl font-bold flex items-center tracking-tight text-slate-100">
+                        <i data-lucide="history" class="mr-3 text-cyan-500"></i> 历史监测快照库
+                        <span id="history-count" class="ml-4 text-xs font-normal text-slate-500 uppercase tracking-widest">0 条记录</span>
+                    </h2>
+                </div>
+                <div id="history-grid" class="flex-1 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6 overflow-y-auto pr-2">
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- 离屏渲染合成画布 -->
+    <canvas id="offscreen-canvas" width="800" height="600" class="hidden"></canvas>
+
+    <script>
+        const STORAGE_KEY = 'uav_tracker_v3_records';
+        let records = [];
+
+        // 初始化
+        window.onload = () => {
+            lucide.createIcons();
+            initSDR();
+            loadFromStorage();
+            setInterval(() => document.getElementById('current-time').innerText = new Date().toLocaleTimeString(), 1000);
+            addLog('SYSTEM', '实时图传与OFDM频谱模块就绪');
+        };
+
+        const loadFromStorage = () => {
+            const saved = localStorage.getItem(STORAGE_KEY);
+            if (saved) {
+                try {
+                    records = JSON.parse(saved);
+                    renderAll();
+                } catch (e) { addLog('ERR', '加载存储失败'); }
+            }
+        };
+
+        const saveToStorage = () => localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
+
+        const clearStorage = () => {
+            if(confirm('警告：将永久删除所有存证图片，是否继续？')) {
+                localStorage.removeItem(STORAGE_KEY);
+                records = [];
+                renderAll();
+                addLog('SYSTEM', '历史库已清空');
+            }
+        };
+
+        function addLog(type, msg) {
+            const container = document.getElementById('log-container');
+            const time = new Date().toLocaleTimeString();
+            const logDiv = document.createElement('div');
+            logDiv.className = "flex leading-relaxed";
+            const colorClass = type === 'DB' ? 'text-cyan-500' : type === 'ERR' ? 'text-rose-500' : 'text-slate-500';
+            logDiv.innerHTML = `<span class="text-slate-600 mr-2">[${time}]</span><span class="${colorClass}">${msg}</span>`;
+            container.prepend(logDiv);
+        }
+
+        window.switchView = (viewName) => {
+            const dash = document.getElementById('view-dashboard');
+            const hist = document.getElementById('view-history');
+            const navDash = document.getElementById('nav-dashboard');
+            const navHist = document.getElementById('nav-history');
+
+            if (viewName === 'dashboard') {
+                dash.classList.remove('hidden'); hist.classList.add('hidden');
+                navDash.className = "p-3 rounded-lg bg-cyan-500 text-white shadow-[0_0_15px_rgba(6,182,212,0.5)]";
+                navHist.className = "p-3 rounded-lg text-slate-500 hover:bg-slate-800";
+                document.getElementById('history-badge').classList.add('hidden');
+            } else {
+                dash.classList.add('hidden'); hist.classList.remove('hidden');
+                navDash.className = "p-3 rounded-lg text-slate-500 hover:bg-slate-800";
+                navHist.className = "p-3 rounded-lg bg-cyan-500 text-white shadow-[0_0_15px_rgba(6,182,212,0.5)]";
+            }
+        };
+
+        // 频谱渲染 (带有OFDM信号特征)
+        const initSDR = () => {
+            const canvas = document.getElementById('sdr-canvas');
+            const ctx = canvas.getContext('2d');
+            const width = canvas.width = 800;
+            const height = canvas.height = 600;
+            const spectrumHeight = Math.floor(height * 0.4);
+            const bins = 512;
+            const freqData = new Float32Array(bins);
+
+            const draw = () => {
+                // 背景底噪
+                for (let i = 0; i < bins; i++) freqData[i] = Math.random() * 0.1;
+                
+                // 模拟 OFDM 信号 (宽带矩形特征)
+                const now = Date.now();
+                const uavFreq = [100, 250, 400][Math.floor(now/2000) % 3];
+                const uavWidth = 40; // OFDM 宽度
+                for (let i = uavFreq; i < uavFreq + uavWidth; i++) {
+                    if (i >= 0 && i < bins) {
+                        freqData[i] = 0.7 + Math.random() * 0.3;
+                    }
+                }
+
+                // 绘制频谱图 (实时更新)
+                ctx.fillStyle = '#020617';
+                ctx.fillRect(0, 0, width, spectrumHeight);
+                
+                // 绘制网格
+                ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+                ctx.beginPath();
+                for(let j=0; j<spectrumHeight; j+=20) { ctx.moveTo(0,j); ctx.lineTo(width,j); }
+                ctx.stroke();
+
+                ctx.beginPath();
+                ctx.moveTo(0, spectrumHeight);
+                for (let i = 0; i < bins; i++) {
+                    const x = (i/bins) * width;
+                    const y = spectrumHeight - (freqData[i] * spectrumHeight * 0.9);
+                    ctx.lineTo(x, y);
+                }
+                ctx.strokeStyle = '#d946ef';
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
+
+                // 瀑布流平移
+                const imgData = ctx.getImageData(0, spectrumHeight, width, height - spectrumHeight - 1);
+                ctx.putImageData(imgData, 0, spectrumHeight + 1);
+                
+                // 写入当前行瀑布流
+                for (let i = 0; i < bins; i++) {
+                    const val = freqData[i];
+                    if (val > 0.6) ctx.fillStyle = `rgb(244, 63, 94)`; // OFDM 强信号红色
+                    else if (val > 0.3) ctx.fillStyle = `rgb(217, 70, 239)`; // 中等信号紫色
+                    else ctx.fillStyle = `rgb(${15+val*50}, ${20+val*30}, ${40+val*80})`; // 底噪深蓝色
+                    ctx.fillRect((i/bins)*width, spectrumHeight, Math.ceil(width/bins), 1);
+                }
+                
+                requestAnimationFrame(draw);
+            };
+            draw();
+        };
+
+        // 核心：真·实时截图合成
+        window.capture = (source) => {
+            const off = document.getElementById('offscreen-canvas');
+            const ctx = off.getContext('2d');
+            const w = off.width;
+            const h = off.height;
+
+            // 1. 绘制背景层
+            ctx.fillStyle = '#020617';
+            ctx.fillRect(0, 0, w, h);
+
+            if (source === '频谱侦测') {
+                // 【核心改进】：直接抓取实时运行的 SDR Canvas 内容
+                const sdrCanvas = document.getElementById('sdr-canvas');
+                ctx.drawImage(sdrCanvas, 50, 80, 700, 450); // 将实时频谱画入快照
+                
+                // 叠加 UI 装饰
+                ctx.strokeStyle = '#d946ef';
+                ctx.lineWidth = 2;
+                ctx.strokeRect(50, 80, 700, 450);
+                ctx.fillStyle = '#d946ef';
+                ctx.font = 'bold 20px monospace';
+                ctx.fillText('LIVE_SDR_OFDM_BURST', 70, 115);
+            } else {
+                // 视觉抓拍实时合成
+                const visionScreen = document.getElementById('vision-screen');
+                // 由于视觉部分是 DOM 模拟，这里用高质量合成模拟实时画面
+                ctx.fillStyle = '#000';
+                ctx.fillRect(100, 100, 600, 400);
+                ctx.strokeStyle = '#f43f5e';
+                ctx.lineWidth = 3;
+                ctx.strokeRect(250, 180, 300, 240);
+                
+                // 绘制准星
+                ctx.beginPath();
+                ctx.arc(400, 300, 30, 0, Math.PI*2);
+                ctx.moveTo(400, 250); ctx.lineTo(400, 350);
+                ctx.moveTo(350, 300); ctx.lineTo(450, 300);
+                ctx.stroke();
+
+                ctx.fillStyle = '#f43f5e';
+                ctx.font = 'bold 20px monospace';
+                ctx.fillText('VISUAL_TARGET_CONFIRMED', 120, 135);
+            }
+
+            // 叠加通用 OSD 信息
+            ctx.fillStyle = 'rgba(255,255,255,0.8)';
+            ctx.font = '14px monospace';
+            const timestamp = new Date().toLocaleString();
+            ctx.fillText(`TIMESTAMP: ${timestamp}`, 30, 40);
+            ctx.fillText(`SOURCE: ${source}_REALTIME_FEED`, 30, 60);
+            ctx.fillText(`COORD: 39.90°N / 116.40°E`, 30, 80);
+            
+            // 扫描线滤镜 (增强快照质感)
+            ctx.fillStyle = 'rgba(255,255,255,0.05)';
+            for(let i=0; i<h; i+=4) ctx.fillRect(0, i, w, 1);
+
+            // 生成最终 DataURL
+            const imageUrl = off.toDataURL('image/jpeg', 0.7);
+            const newRecord = {
+                id: Date.now(),
+                source,
+                imageUrl,
+                timestamp
+            };
+
+            records.unshift(newRecord);
+            saveToStorage();
+            renderAll();
+            
+            document.getElementById('history-badge').classList.remove('hidden');
+            addLog('DB', `实时快照已采集: ${source}`);
+        };
+
+        const renderAll = () => {
+            const list = document.getElementById('history-list');
+            const grid = document.getElementById('history-grid');
+            const countLabel = document.getElementById('history-count');
+            
+            list.innerHTML = records.length === 0 ? '<div class="h-32 flex items-center justify-center text-slate-600 text-xs italic">无存证记录</div>' : '';
+            grid.innerHTML = '';
+            countLabel.innerText = `${records.length} 条记录`;
+
+            records.forEach(r => {
+                const item = document.createElement('div');
+                item.className = "flex bg-slate-950/50 border border-slate-800 rounded-lg p-2 space-x-3 hover:border-cyan-500/30 transition-all cursor-pointer group";
+                item.innerHTML = `
+                    <div class="w-24 h-16 overflow-hidden rounded border border-slate-800 bg-black">
+                        <img src="${r.imageUrl}" class="w-full h-full object-cover group-hover:scale-110 transition-transform" />
+                    </div>
+                    <div class="flex-1 flex flex-col justify-center">
+                        <div class="flex justify-between items-baseline">
+                            <span class="text-[11px] font-bold ${r.source === '视觉识别' ? 'text-rose-400' : 'text-fuchsia-400'}">${r.source}</span>
+                            <span class="text-[9px] text-slate-500">${r.timestamp}</span>
+                        </div>
+                        <div class="text-[9px] text-slate-500 mt-1 uppercase tracking-tighter">DATA_SYNC_SUCCESS</div>
+                    </div>
+                `;
+                list.appendChild(item);
+
+                const card = document.createElement('div');
+                card.className = "group bg-slate-950 border border-slate-800 rounded-xl overflow-hidden hover:border-cyan-500/50 transition-all hover:shadow-[0_0_20px_rgba(6,182,212,0.15)]";
+                card.innerHTML = `
+                    <div class="aspect-video bg-black relative overflow-hidden">
+                        <img src="${r.imageUrl}" class="w-full h-full object-cover opacity-90 group-hover:opacity-100 transition-opacity" />
+                        <div class="absolute bottom-2 left-2 px-1.5 py-0.5 bg-black/60 backdrop-blur rounded text-[8px] text-cyan-400 font-mono">FILE_ID: ${r.id.toString().slice(-6)}</div>
+                    </div>
+                    <div class="p-4 flex justify-between items-center">
+                        <div>
+                            <div class="text-slate-100 font-bold text-xs">${r.source}实时切片</div>
+                            <div class="text-slate-500 font-mono text-[9px] mt-1">${r.timestamp}</div>
+                        </div>
+                        <i data-lucide="download" class="w-4 h-4 text-slate-600 hover:text-cyan-400 transition-colors cursor-pointer"></i>
+                    </div>
+                `;
+                grid.appendChild(card);
+            });
+            lucide.createIcons();
+        };
+    </script>
+</body>
+</html>
