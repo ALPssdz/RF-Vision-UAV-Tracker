@@ -98,7 +98,7 @@ class RFToolchain:
                 log_lines.append(f"SYSTEM [False Positive Subdued]: 数理判决标定系统发现 OFDM 结构调制泛型特征环境载波噪音，截断预警投递。")
                 
         if alert_flag:
-            log_lines.append("【最终系统综合判定结论】: 判定：检测到无人机")
+            log_lines.append("<span style='color: #ff3333; font-weight: bold;'>【最终系统综合判定结论】: 判定：检测到无人机</span>")
         else:
             log_lines.append("【最终系统综合判定结论】: 判定：未检测到无人机")
                 

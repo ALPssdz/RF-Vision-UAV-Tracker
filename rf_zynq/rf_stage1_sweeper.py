@@ -26,7 +26,9 @@ class RF_Stage1_Sweeper:
             self.sdr.rx_rf_bandwidth = self.sample_rate
             self.sdr.rx_buffer_size = self.buffer_size
             # 建立固化的 AGC 自动增益边界等效常数级参数（基于慢建立配置）
-            self.sdr.rx_hardwaregain_control_mode = 'slow_attack' 
+            # 改为手动底噪增益阈值，避免环境宽带底噪产生自动过激放大触发 YOLO 全屏假阳性
+            self.sdr.rx_hardwaregain_control_mode = 'manual'
+            self.sdr.rx_hardwaregain_chan0 = 20 
             print("[INFO] Stage1: SDR Initialization Protocol Completed.")
         except Exception as e:
             print(f"[ERROR] Stage1: Failed referencing the allocated SDR device socket address: {e}")

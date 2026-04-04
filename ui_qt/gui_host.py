@@ -169,7 +169,8 @@ class MainWindow(QMainWindow):
             self.lbl_fusion_status.setStyleSheet(f"background-color: {status_dict['color']}; color: white;")
 
     def append_log(self, text):
-        self.log_textbox.appendPlainText(text)
+        html_text = text.replace('\n', '<br>')
+        self.log_textbox.appendHtml(html_text)
         self.log_textbox.verticalScrollBar().setValue(self.log_textbox.verticalScrollBar().maximum())
 
     def toggle_play(self):
