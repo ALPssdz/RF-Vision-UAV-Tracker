@@ -4,53 +4,49 @@ from rf_zynq.rf_stage3_cyclostationary import RF_Stage3_CycloAudit
 import time
 
 def load_yolo_model():
-    # print("[YOLO 中枢] 尝试挂载训练好的无人机基座大模型 best.pt ...")
     from ultralytics import YOLO
     import os, glob
     
-    # 动态抓取 yolo_train 文件夹下最新的 detect/train*/weights/best.pt
-    # 环境已被移动至项目绝对根目录下的 backend_rk3588 子包，所以向前退一层便是项目总根目录
+    # 动态定位项目物理根目录路径，寻址提取最新的预训练权重体系
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    # 我们知道先前的权重是保留在旧的 rf_zynq 测试堆栈里的
     search_path = os.path.join(project_root, "rf_zynq", "yolo", "runs", "detect", "*", "weights", "best.pt")
     matches = glob.glob(search_path)
+    
     if not matches:
-        raise FileNotFoundError("没有找到 best.pt，您确定模型练完了吗？")
+        raise FileNotFoundError("YOLO pre-trained weights 'best.pt' not found in expected directory.")
+        
     best_model_path = sorted(matches, key=os.path.getmtime)[-1]
-    # print(f"[YOLO 中枢] 成功截获引擎点: {best_model_path}")
     return YOLO(best_model_path)
 
 def active_yolo_inference(model, tensor_bgr):
     """
-    接驳内存里从第二阶段吐过来的三通道瀑布流图彩图，执行实弹检测！
+    针对输入的 640x640 瀑布流张量数据矩阵，挂载神经网络实施置信度检测算子推断。
     """
     import numpy as np
-    # YOLO 对于 cv2 生成的图片，默认预测
     results = model.predict(source=tensor_bgr, verbose=False)
     
     highest_score = 0.0
     for r in results:
         boxes = r.boxes
         if len(boxes) > 0:
-            # 取出最大的置信度概率分数
+            # 提取边界框最大置信度
             confs = boxes.conf.cpu().numpy()
             highest_score = float(np.max(confs))
             
-    # 高感知门限：只要有大于 60% 把握觉得像无人机，就拉警报送第三阶段
+    # 动态置信度判定阈值
     is_detected = highest_score > 0.60
-    
-    # 获取 YOLO 自动帮忙画好框的彩色渲染帧！
     annotated_frame = results[0].plot()
     
     return is_detected, highest_score, annotated_frame
 
 class RFToolchain:
+    """
+    核心射频处理控制管道的类封装实现，整合三阶梯级的认知检测算法流程。
+    """
     def __init__(self):
-        """将之前的主函数强耦合操作，抽离为一个生命周期常驻对象"""
         self.stage1_scan = RF_Stage1_Sweeper()
         self.stage1_scan.initialize_sdr()
         
-        # 加载神兵利器大模型
         self.brain_yolo = load_yolo_model()
         
         self.stage2_vision = RF_Stage2_Dwell(self.stage1_scan.sdr)
@@ -60,45 +56,50 @@ class RFToolchain:
 
     def tick(self):
         """
-        每次调用执行一次三级审查侦测
-        返回: (带有标注框的 BGR 彩色数组，日志文本，报警状态bool)
+        发起一次完整的宏观软硬件联合周期巡检调用。
+        返回: 带有边框标注的光栅图像矩阵，状态日志组，以及告警判定布尔级标量及附带属性字典。
         """
         self.cycle_count += 1
         log_lines = []
-        log_lines.append(f"\n======== [系统监测轮次: {self.cycle_count}] ========")
+        log_lines.append(f"\n======== [System Cycle Execution: {self.cycle_count}] ========")
         
-        # 【Stage 1】
+        # [第一级触发检测梯次: 射频底噪宽带能量谱切片扫描]
         time_s1 = time.time()
         active_center_freq = self.stage1_scan.run_sweep_cycle()
         cost_s1 = time.time() - time_s1
-        log_lines.append(f"📡 【S1 能量扫描】耗时 {cost_s1:.2f} s | 活跃中心频率: {active_center_freq/1e6} MHz")
+        log_lines.append(f"[S1 - 频段能量扫描提取]: 执行耗时 {cost_s1:.2f} 秒 | 判定中心峰值候选频频率: {active_center_freq/1e6} MHz")
         
-        # 【Stage 2】
+        # [第二级触发检测梯次: 锁相凝视捕获及视觉张量推断分类]
         time_s2 = time.time()
         waterfall_tensor = self.stage2_vision.generate_waterfall_tensor(active_center_freq)
         yolo_flag, bbox_score, annotated_frame = active_yolo_inference(self.brain_yolo, waterfall_tensor)
         cost_s2 = time.time() - time_s2
-        log_lines.append(f"👁️ 【S2 频段驻留与推断】耗时 {cost_s2:.2f} s | 模型判别: {yolo_flag} (置信度 {bbox_score:.4f})")
+        log_lines.append(f"[S2 - 目标凝视锁定特征提取]: 执行耗时 {cost_s2:.2f} 秒 | 目标标量识别判定状态: {yolo_flag} (网络置信度评价: {bbox_score:.4f})")
         
         alert_flag = False
-        
-        # 【Stage 3】
         alert_info = {}
+        
+        # [第三级触发检测梯次: 基于高层抽象谱学的二次假阳性审计复刻]
         if yolo_flag:
-            log_lines.append("⚠️ 视觉模型触发正向判别，移交至 S3 模块进行循环谱特征二次校验...")
+            log_lines.append("张量判定约束触发跨层协议通过，正移交 S3 模块请求基带循环谱特征校验...")
             time_s3 = time.time()
             confirm_flag, audit_score = self.stage3_audit.run_spectral_audit(self.stage1_scan.sdr)
             cost_s3 = time.time() - time_s3
-            log_lines.append(f"🧠 【S3 算法校验】耗时 {cost_s3:.2f} s | 循环特征峰值判定: {confirm_flag} (量度数值 {audit_score:.4f})")
+            log_lines.append(f"[S3 - 底层协议级数理特征审计]: 矩阵收敛耗时 {cost_s3:.2f} 秒 | 谱学核验判定结果: {confirm_flag} (幅值量级量度: {audit_score:.4f})")
             
             if confirm_flag:
-                log_lines.append(f"🎯 [系统告警]: 捕捉到高置信度无人机目标射频信号！(中心频率: {active_center_freq/1e6} MHz)")
+                log_lines.append(f"CRITICAL [True Positive]: 基于三轴向立体特征判定锁定入侵信源！记录频率节点 {active_center_freq/1e6} MHz。")
                 alert_flag = True
                 alert_info = {"freq_mhz": active_center_freq / 1e6, "score": bbox_score}
                 
                 import cv2
                 cv2.putText(annotated_frame, "CONFIRMED: UAV SIGNAL", (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 0, 255), 3)           
             else:
-                log_lines.append(f"🛡️ [误报抑制]: 循环谱分析表明该频段呈现宽带 OFDM 环境底噪特征 (如 Wi-Fi)，已主动规避告警。")
+                log_lines.append(f"SYSTEM [False Positive Subdued]: 数理判决标定系统发现 OFDM 结构调制泛型特征环境载波噪音，截断预警投递。")
+                
+        if alert_flag:
+            log_lines.append("【最终系统综合判定结论】: 判定：检测到无人机")
+        else:
+            log_lines.append("【最终系统综合判定结论】: 判定：未检测到无人机")
                 
         return annotated_frame, "\n".join(log_lines), alert_flag, alert_info

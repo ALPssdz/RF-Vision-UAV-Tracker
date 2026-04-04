@@ -6,12 +6,12 @@ from datetime import datetime
 
 class DBManager:
     """
-    Data Persistence Adapter.
-    Handles physical file I/O operations and SQLite table management for the synthesized multi-modal evidential records.
-    All runtime databases and image caches are maintained within this localized module directory to ensure encapsulation.
+    底层数据封存封装层接口（Data Persistence Adapter）。
+    对内处理跨物理文件系统图像矩阵存储和多模态异构融合数据的 SQLite 表单事务。
+    该模块严格遵循内聚原则，使得日志、缓存皆固定落位于模块局域存储目录内。
     """
     def __init__(self, db_filename="rf_alert_history.db", img_dirname="alert_images"):
-        # Localize the storage paths strictly within the 'database' semantic folder
+        # 限定文件I/O活动半径在 database 的单一实体语义文件夹内
         self.module_dir = os.path.dirname(os.path.abspath(__file__))
         
         self.db_path = os.path.join(self.module_dir, db_filename)
@@ -23,7 +23,7 @@ class DBManager:
         self._init_tables()
 
     def _init_tables(self):
-        """ Initializes the database relations and schemas for sequential event logs. """
+        """ 执行初始化的事件总账数据库物理建表操作。 """
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         cursor.execute('''
@@ -40,8 +40,8 @@ class DBManager:
 
     def log_alert(self, freq_mhz, score, bgr_image):
         """
-        Commits a generated multi-modal event snapshot to the file system and registers its metadata sequentially.
-        Returns the auto-incremented primary key of the new transaction log.
+        向磁盘映射生成的联合模态监控事件序列图，并在关系型数据库内顺次进行实体注册。
+        返回本地日志事务流中自增衍生的唯一索引 ID 号。
         """
         now = datetime.now()
         timestamp_str = now.strftime("%Y-%m-%d %H:%M:%S")
@@ -51,7 +51,7 @@ class DBManager:
         filename = f"UAV_Intercept_{freq_mhz}MHz_{timestamp_file}_{ms}.jpg"
         absolute_img_path = os.path.join(self.img_dir, filename)
         
-        # Serialize the matrix to disk
+        # 使用下层调用栈实施硬编码字节级序列化矩阵
         cv2.imwrite(absolute_img_path, bgr_image)
         
         conn = sqlite3.connect(self.db_path)
@@ -69,9 +69,8 @@ class DBManager:
 
     def get_all_alerts(self):
         """
-        Extracts all historical alert rows ordered in descending chronology.
-        Provides a data population feed for decoupled presentation entities (View Layer).
-        Returns a list of tuples: [(id, timestamp, freq, score, image_path), ...]
+        提供给前端 View 表现层执行历史日志抽取的访问方法。
+        按反时间轴提取记录，返回游标数据的只读链表形式：[(id, timestamp, freq, score, image_path), ...]
         """
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()

@@ -4,41 +4,36 @@ import time
 
 class RF_Stage2_Dwell:
     """
-    认知射频第二阶段：驻留与凝视 (Dwell & Vision)
-    在 Stage1 确定的高激活信道上，高速抓取连续帧。
-    完成1维频率池化降维，组合为适用于 YOLO (640x640) 的图像张量内存块。
+    Cognitive RF Tier 2: Dwell Phase and Vision Object Processing.
+    对一阶网络提交的占优活跃带频分通道进行连续不断的驻留式阵列捕集。
+    负责把长序时间轴多维物理采样列进行阵列截取缩编，生成适用于 YOLO 卷积核体系等效运算维度的 640x640 规整张量缓冲块。
     """
     def __init__(self, sdr_instance):
-        # 接收外部传入的 SDR 对象，防止重开占用
         self.sdr = sdr_instance
         self.buffer_size = 16384
         self.window = np.blackman(self.buffer_size)
         
-        # YOLO 图片尺寸目标
         self.target_width = 640
         self.target_height = 640
         
-        # --- 降维核心参数公式推导 ---
-        # 16384 // 640 = 25，多出 384 个点。
-        # 为保留最核心频谱，我们从两侧各砍掉 192 个点。
+        # --- 降维约束级收割切分法则参数化配置 ---
+        # 16384 // 640 = 25，生成数组列末会保留 384 无效位点边界。
+        # 取中将边界区域截短 192 特征点实施齐整对齐对等切分。
         self.pool_size = self.buffer_size // self.target_width
         self.trim_side = (self.buffer_size - (self.pool_size * self.target_width)) // 2
         
-        # 色度灰度化映射限度，防止极大的尖峰让底噪全部沉沦为黑色影响 YOLO 判断
-        # 可视化参数与前 sdr_burst2 兼容
+        # 控制像素阈值域色彩极值配置条件
         self.vmin = -70
         self.vmax = 30
 
     def _convert_to_1d_pooled_db(self, complex_iq):
         """
-        进行 FFT 运算并将 16384 个频点通过最大池化坍缩到 640 个宽度的物理块
+        激活基带快速傅里叶时频换算 (FFT) 并执行最大池化结构约束操作，将全带特征信息矢量块收缩合并进入 640 个有效空间像素靶点限度。
         """
         # ==============================================================
-        # 🚨 极其致命的底层物理硬件差异补丁！
-        # 训练基底用的 USRP 数据是最高为 1.0 的归一化浮点数，最高功率仅 30dB。
-        # 而实时抓取的 PlutoSDR 返回的是 [-32768, +32767] 的超大整型！
-        # 若不在此处除以 32768.0 归一化，其算出的计算功率将高达 +130dB 以上！
-        # 导致所有数值强行破顶 vmax(30)，将热红外图全部烧成了死白！
+        # 硬件结构基底层级参数差异配准补偿机制:
+        # 区别于标准通用 USRP 1.0 的最大单位域内浮点规范化表示输出特征，PlutoSDR 的发送下行 IQ 限制为定点高阶大数字边界 [-32768, 32767]。
+        # 为符合 (-70, 30) dB 分界量程尺度，必需施加强制除法偏移约简 / 32768.0 的算术除以消除大量热图严重过白曝光突起特征的显现。
         # ==============================================================
         normalized_iq = complex_iq / 32768.0 
         
@@ -46,60 +41,36 @@ class RF_Stage2_Dwell:
         fft_data = np.fft.fftshift(np.fft.fft(windowed_data))
         power_db = 20 * np.log10(np.abs(fft_data) + 1e-12)
         
-        # >> 核心裁剪与降维合并
+        # >> 组件特征提取缩放及横向裁剪边缘规整匹配
         trimmed_db = power_db[self.trim_side : -self.trim_side]
-        # 重塑为 (640, 25) 的矩阵
         reshaped = trimmed_db.reshape((self.target_width, self.pool_size))
-        # 沿着每一段的频段宽度 (25个 FFT Bins) 获取最大峰值，彻底防止细小频段被均值淹没
+        
+        # 应用最大池化操作算子（取代单纯平滑均值处理），保留绝对短瞬基带微弱窄跳突起信号不至于丢失。
         pooled_1d = np.max(reshaped, axis=1)
         
         return pooled_1d
 
     def generate_waterfall_tensor(self, center_freq):
         """
-        参数化抓取并零拷贝生成 Numpy 640x640 张量。
-        在 RK3588 上，直接将该矩阵(float32或uint8)过给 RKNN 执行推断即可。
+        以矩阵填充迭代产生出带有预标记属性的 Numpy 640x640 类型数据流列结构数组，
+        并支持无接口阻碍传唤 NPU/YOLO 相关张量计算端点进行推理。
         """
         self.sdr.rx_lo = int(center_freq)
-        # 弃掉前两个脏 Buffer
         _ = self.sdr.rx()
         _ = self.sdr.rx()
-        
-        print(f"[Dwell] 锁定 {center_freq/1e6: .1f} MHz, 正在高频构建 640x640 内存张量...")
         
         waterfall = np.zeros((self.target_height, self.target_width), dtype=np.float32)
         
-        # 凝视生成图幅的时间理论值: 640 * 16384 / 40e6 = 0.262 s
-        # 加入内存池化运算后整个块的时长应在 0.5s 上下 
-        start = time.time()
         for idx in range(self.target_height):
             iq_data = self.sdr.rx()
             waterfall[idx, :] = self._convert_to_1d_pooled_db(iq_data)
             
-        cost = time.time() - start
-        
-        # 归一化为 0-255 灰度单通道张量 (模拟图像，但不写盘)
-        # 灰度计算公式：(DB - vmin) / (vmax - vmin) * 255
         waterfall_clipped = np.clip(waterfall, self.vmin, self.vmax)
         waterfall_norm = ((waterfall_clipped - self.vmin) / (self.vmax - self.vmin) * 255.0)
         waterfall_uint8 = waterfall_norm.astype(np.uint8)
         
-        # ★ 极其关键的一步：将 numpy 的黑白张量用底层 C++ API 洗成 HOT 配色的 3 通道 BGR 张量
+        # 运用 OpenCV 色彩算子映射单通道物理分布极值平面为符合通例的仿生类红外三通道矩阵
         import cv2
         waterfall_bgr = cv2.applyColorMap(waterfall_uint8, cv2.COLORMAP_HOT)
         
-        print(f"✅ 张量生成就绪，凝视耗时: {cost:.3f} s，尺寸: {waterfall_bgr.shape}")
-        
-        # 直接将 waterfall_bgr 转给 YOLO 或者 RKNN API 执行推断
         return waterfall_bgr
-        
-if __name__ == "__main__":
-    from rf_stage1_sweeper import RF_Stage1_Sweeper
-    # 模拟串联测试
-    sweeper = RF_Stage1_Sweeper()
-    sweeper.initialize_sdr()
-    target_f = sweeper.run_sweep_cycle()
-    
-    dweller = RF_Stage2_Dwell(sweeper.sdr)
-    tensor = dweller.generate_waterfall_tensor(target_f)
-    print("内存数据块头 10 个像素映射强度: ", tensor[0, :10])

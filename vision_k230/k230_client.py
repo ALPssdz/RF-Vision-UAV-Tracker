@@ -7,20 +7,20 @@ import time
 
 class K230NetworkClient:
     """
-    K230 Edge Node Network Client.
-    Responsible for receiving asynchronous Out-Of-Band (OOB) UDP telemetry packets
-    with minimal latency constraints, alongside the decoupled High-throughput RTSP video stream.
+    K230 边缘节点网络通信客户端配置实体。
+    此适配器主要负责高保真获取非对称的异步带外 UDP (Out-Of-Band) 信令极低延迟遥测包，
+    同时在解耦的旁支线程获取高吞吐量的连贯化预解码 RTSP 光流媒体反馈。
     """
     def __init__(self, rtsp_url="rtsp://192.168.31.250/stream", udp_port=8080):
         self.rtsp_url = rtsp_url
         self.udp_port = udp_port
         
-        # Local state buffers
+        # 建立线程读写的内部本地数据缓冲池
         self.latest_frame = np.zeros((640, 1137, 3), dtype=np.uint8)
         self.latest_telemetry = {"alert": False, "confidence": 0.0, "bbox": []}
         
         self.running = False
-        self.mock_drone_detected = False # Toggled via Dev Tools in UI
+        self.mock_drone_detected = False # 经 UI 呈现层内部调试面板下发的人工覆写开关
         
         self._video_thread = None
         self._udp_thread = None
@@ -45,8 +45,7 @@ class K230NetworkClient:
 
     def get_synced_data(self):
         """ 
-        Exposes the temporally aligned memory snapshot of the current video buffer 
-        and the OOB JSON event parameters to the central scheduler.
+        向上限中央总线透传在物理时空刻表产生交叉时间对齐的张量特征流副本。
         """
         import copy
         telemetry = copy.deepcopy(self.latest_telemetry)
@@ -60,7 +59,7 @@ class K230NetworkClient:
         return frame, telemetry
 
     def _video_loop(self):
-        """ Decoupled RTSP H.264 Polling Thread """
+        """ 解耦异步 RTSP H.264 视频推流轮询处理线程 """
         cap = cv2.VideoCapture(self.stream_url) if hasattr(self, 'stream_url') else cv2.VideoCapture(self.rtsp_url)
         while self.running:
             ret, frame = cap.read()
@@ -69,18 +68,18 @@ class K230NetworkClient:
                 cv2.putText(blank, "[K230] RTSP UNAVAILABLE", (150, 320), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (100, 100, 200), 3)
                 self.latest_frame = blank
                 time.sleep(0.5)
-                # Auto-resume mechanism
+                # 自愈式异常重联执行器机制
                 cap = cv2.VideoCapture(self.rtsp_url)
             else:
                 h, w = frame.shape[:2]
                 new_w = int((640 / h) * w)
                 self.latest_frame = cv2.resize(frame, (new_w, 640))
-            time.sleep(0.02) # Enforce 50FPS max limits
+            time.sleep(0.02) # 强制 50FPS 最高帧率阀门管制
             
         cap.release()
 
     def _udp_loop(self):
-        """ Hard-realtime UDP polling channel for OOB JSON payloads """
+        """ 强化硬级别实时优先级的端到端带外 UDP 遥测信函提取环路 """
         while self.running:
             try:
                 data, addr = self._sock.recvfrom(1024)

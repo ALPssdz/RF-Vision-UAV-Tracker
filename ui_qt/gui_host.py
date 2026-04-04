@@ -10,9 +10,9 @@ from database.db_manager import DBManager
 
 class MainWindow(QMainWindow):
     """
-    Presentation Layer (View Component) for the RF-Vision system.
-    This class handles rendering logic exclusively and operates in strict read-only mode regarding system states.
-    All data generation, network pooling, and database commit operations are delegated to the central controller (hub).
+    基于 PyQt5 构建的纯粹前端表现视图类（Strict View Layer）。
+    采用读写隔离沙盒法则，屏蔽硬件数据抓取方法及底层 SQLite 数据源写操作，
+    专注于单向数据流的可视化解析缓冲工作。
     """
     def __init__(self, hub=None):
         super().__init__()
@@ -20,7 +20,7 @@ class MainWindow(QMainWindow):
         self.resize(1600, 900)
         
         self.hub = hub
-        self.db_engine = DBManager() # Retained purely for read-only Model-View data population.
+        self.db_engine = DBManager() # 仅用作视图层模型表格只读挂载点
         
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
@@ -42,12 +42,12 @@ class MainWindow(QMainWindow):
         self.tabs.currentChanged.connect(self.on_tab_changed)
         
         if self.hub:
-            # Bind UI slots to Central Hub signals
+            # 建立系统前端总线事件信号槽联结节点
             self.hub.signal_rf_frame.connect(self.update_rf_frame)
             self.hub.signal_k230_frame.connect(self.update_k230_frame)
             self.hub.signal_log.connect(self.append_log)
             self.hub.signal_system_status.connect(self.update_status_labels)
-            self.hub.signal_db_updated.connect(self.load_db_data)  # Database update trigger
+            self.hub.signal_db_updated.connect(self.load_db_data)  # 异步模型同步触发器
 
     def setup_live_dashboard(self):
         main_layout = QVBoxLayout(self.tab1)
@@ -142,7 +142,7 @@ class MainWindow(QMainWindow):
         
         self.current_db_paths = [] 
         
-        self.db_img_label = QLabel("Waiting for row selection...");
+        self.db_img_label = QLabel("待命：正在等待实体行列选择事件...");
         self.db_img_label.setFixedSize(1400, 600)  
         self.db_img_label.setStyleSheet("background-color: #1e1e1e; color: #888; font-size: 16px; border: 2px dashed #666;")
         self.db_img_label.setAlignment(Qt.AlignCenter)
@@ -150,7 +150,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.db_table, stretch=1)
         layout.addWidget(self.db_img_label, stretch=3)
 
-    # =============== Drawing Callbacks ===============
+    # =============== 视图渲染回调集合 ===============
     def update_rf_frame(self, frame):
         self.render_cv2_to_qlabel(frame, self.img_rf)
 
@@ -158,7 +158,7 @@ class MainWindow(QMainWindow):
         self.render_cv2_to_qlabel(frame, self.img_k230)
 
     def update_status_labels(self, status_dict):
-        """ Update UI indicator bars passed from Controller """
+        """ 解析中央控制器下发的指令更新状态信标 """
         if "sdr" in status_dict:
             self.lbl_rf_status.setText(status_dict["sdr"])
         if "vision" in status_dict:
@@ -188,7 +188,7 @@ class MainWindow(QMainWindow):
             self.load_db_data()
 
     def load_db_data(self):
-        # Read-only access to Model layer to populate View tables.
+        # Read-only 模型操作调用：挂载历史证据数据条目。
         rows = self.db_engine.get_all_alerts()
         self.db_table.setRowCount(len(rows))
         self.current_db_paths = []
@@ -199,8 +199,8 @@ class MainWindow(QMainWindow):
             self.db_table.setItem(row_idx, 3, QTableWidgetItem(f"{data[3] * 100:.2f} %"))
             self.current_db_paths.append(data[4])
             
-        if len(rows) > 0 and self.db_img_label.text() == "Waiting for row selection...":
-            self.db_img_label.setText("数据加载完成。请选择特定行加载关联影像记录。")
+        if len(rows) > 0 and self.db_img_label.text() == "待命：正在等待实体行列选择事件...":
+            self.db_img_label.setText("数据装载执行完毕。请激活目标记录以调用底层视觉文件。")
 
     def on_db_row_selected(self):
         selected_items = self.db_table.selectedItems()
@@ -213,7 +213,7 @@ class MainWindow(QMainWindow):
             scaled = cv2.resize(cv_img, (1400, int(1400/w*h)))
             self.render_cv2_to_qlabel(scaled, self.db_img_label)
         else:
-            self.db_img_label.setText("I/O Error: 本地存档图片未找到。")
+            self.db_img_label.setText("I/O 系统级错误：本地文件检索寻址失败。")
 
     def render_cv2_to_qlabel(self, cv_img, qlabel):
         qlabel.clear()
