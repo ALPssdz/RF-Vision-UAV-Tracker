@@ -25,7 +25,7 @@ class RFPipelineWorker(QThread):
         self._killed = False
         
     def run(self):
-        self.log_ready.emit("🎯 硬件控制线程与数据库直连通道已上线！可以开始发射侦测指令。")
+        self.log_ready.emit("✅ 系统初始化完成，软件定义无线电 (SDR) 线程与数据库读写通道已正常待命。")
         while not self._killed:
             if self.running or self.step_once:
                 try:
@@ -40,7 +40,7 @@ class RFPipelineWorker(QThread):
                         
                 except Exception as e:
                     import traceback
-                    self.log_ready.emit(f"❌ 严重内部架构错误: {e}\n{traceback.format_exc()}")
+                    self.log_ready.emit(f"❌ 运行期线程异常 (Runtime Exception): {e}\n{traceback.format_exc()}")
                     self.running = False
                     
                 if self.step_once:
@@ -54,7 +54,7 @@ class RFPipelineWorker(QThread):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("RF-Vision : 雷达控制中枢与档案数据库 [Windows]")
+        self.setWindowTitle("RF-Vision: 分布式射频态势感知与特征溯源数据库")
         self.resize(1150, 750)
         
         # 挂载极其纯洁轻量的关系型存根数据库引擎
@@ -75,14 +75,14 @@ class MainWindow(QMainWindow):
         # ==================================
         self.tab1 = QWidget()
         self.setup_tab1()
-        self.tabs.addTab(self.tab1, "📡 正在侦察 (Live Radar)")
+        self.tabs.addTab(self.tab1, "📡 实时频谱监测模块")
         
         # ==================================
         # -- Tab 2: 历史特征数据库 --
         # ==================================
         self.tab2 = QWidget()
         self.setup_tab2()
-        self.tabs.addTab(self.tab2, "🗄️ 案件取证室 (Alert Database)")
+        self.tabs.addTab(self.tab2, "🗄️ 异常信号特征数据库")
         
         # 当从前台切回后台表单时，我们让表单即刻刷新！
         self.tabs.currentChanged.connect(self.on_tab_changed)
@@ -101,12 +101,12 @@ class MainWindow(QMainWindow):
         left_layout = QVBoxLayout()
         left_layout.setContentsMargins(10, 10, 10, 10)
         
-        self.btn_play = QPushButton("▶ 授权无限戒备 (Auto-Play)")
+        self.btn_play = QPushButton("▶ 连续采集模式 (Continuous)")
         self.btn_play.setMinimumHeight(60)
         self.btn_play.setStyleSheet("background-color: #1b5e20; color: white; border-radius: 5px;")
         self.btn_play.clicked.connect(self.toggle_play)
         
-        self.btn_step = QPushButton("⏭ 推演下一个可疑帧 (Step)")
+        self.btn_step = QPushButton("⏭ 单帧步进分析 (Step-by-step)")
         self.btn_step.setMinimumHeight(60)
         self.btn_step.setStyleSheet("background-color: #e65100; color: white; border-radius: 5px;")
         self.btn_step.clicked.connect(self.step_once)
@@ -123,8 +123,8 @@ class MainWindow(QMainWindow):
         self.img_label.setFixedSize(640, 640)
         self.img_label.setStyleSheet("background-color: #000; border: 3px solid #666;")
         self.img_label.setAlignment(Qt.AlignCenter)
-        self.img_label.setText("⚡等待雷达天线捕获信号流...")
-        self.img_label.setStyleSheet("color: white; font-size: 22px;")
+        self.img_label.setText("建立通信连接以接收实时时频张量流 ...")
+        self.img_label.setStyleSheet("color: white; font-size: 18px;")
         
         main_layout.addLayout(left_layout, stretch=1)
         main_layout.addWidget(self.img_label)
@@ -135,7 +135,7 @@ class MainWindow(QMainWindow):
         # >>> 左侧数据表
         self.db_table = QTableWidget()
         self.db_table.setColumnCount(4)
-        self.db_table.setHorizontalHeaderLabels(["库编号", "落盘时间", "侦测频段 (MHz)", "AI 确信分"])
+        self.db_table.setHorizontalHeaderLabels(["记录 ID", "时间戳", "中心频点 (MHz)", "AI 置信度"])
         self.db_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.db_table.setSelectionBehavior(QTableWidget.SelectRows)
         self.db_table.setSelectionMode(QTableWidget.SingleSelection)
@@ -146,9 +146,9 @@ class MainWindow(QMainWindow):
         self.current_db_paths = [] 
         
         # >>> 右侧历史图传投影仪
-        self.db_img_label = QLabel("👈 请在左侧列表中选择您想回顾的案卷！")
+        self.db_img_label = QLabel("正在等待选中记录以呈现时频热图特征结构...")
         self.db_img_label.setFixedSize(640, 640)
-        self.db_img_label.setStyleSheet("background-color: #1a1a1a; color: #aaa; font-size: 20px; border: 3px dashed #444;")
+        self.db_img_label.setStyleSheet("background-color: #1a1a1a; color: #aaa; font-size: 18px; border: 3px dashed #444;")
         self.db_img_label.setAlignment(Qt.AlignCenter)
         
         layout.addWidget(self.db_table, stretch=1)
@@ -157,11 +157,11 @@ class MainWindow(QMainWindow):
     def toggle_play(self):
         if self.worker.running:
             self.worker.running = False
-            self.btn_play.setText("▶ 授权无限戒备 (Auto-Play)")
+            self.btn_play.setText("▶ 连续采集模式 (Continuous)")
             self.btn_play.setStyleSheet("background-color: #1b5e20; color: white;")
         else:
             self.worker.running = True
-            self.btn_play.setText("⏸ 放弃戒备挂起系统 (Pause)")
+            self.btn_play.setText("⏸ 挂起平台采样 (Suspend)")
             self.btn_play.setStyleSheet("background-color: #b71c1c; color: white;")
             
     def step_once(self):
@@ -188,7 +188,7 @@ class MainWindow(QMainWindow):
         freq = alert_info.get("freq_mhz", 0.0)
         score = alert_info.get("score", 0.0)
         new_id = self.db_engine.log_alert(freq, score, frame)
-        self.append_log(f"💾 [数据库存档指令]: 编号 NO.{new_id} 的案件取证图传已永久落盘！")
+        self.append_log(f"💾 数据持久化完成: 异常记录 ID: {new_id} 的时频特征矩阵已稳固至本地数据库。")
 
     def on_tab_changed(self, index):
         # 只要您敢切到案卷管理 Tab (索引 1)，我就敢刷最热库表！
@@ -202,7 +202,7 @@ class MainWindow(QMainWindow):
         
         for row_idx, data in enumerate(rows):
             # data: (id, timestamp, freq, score, image_path)
-            self.db_table.setItem(row_idx, 0, QTableWidgetItem(f"NO. {data[0]}"))
+            self.db_table.setItem(row_idx, 0, QTableWidgetItem(f"ID-{data[0]}"))
             self.db_table.setItem(row_idx, 1, QTableWidgetItem(str(data[1])))
             self.db_table.setItem(row_idx, 2, QTableWidgetItem(f"{data[2]} MHz"))
             self.db_table.setItem(row_idx, 3, QTableWidgetItem(f"{data[3] * 100:.2f} %"))
@@ -210,7 +210,7 @@ class MainWindow(QMainWindow):
             
         # 刷完表格顺便清空一下右侧
         self.db_img_label.clear()
-        self.db_img_label.setText("档案载入完毕，等待查阅...")
+        self.db_img_label.setText("数据加载完毕，请点选相关条目检视图像实体。")
 
     def on_db_row_selected(self):
         selected_items = self.db_table.selectedItems()
@@ -222,7 +222,7 @@ class MainWindow(QMainWindow):
         if cv_img is not None:
             self.render_cv2_to_qlabel(cv_img, self.db_img_label)
         else:
-            self.db_img_label.setText("❌ 录像带毁损（原图被物理抹除！）")
+            self.db_img_label.setText("❌ 数据读取异常：对应的物理图像实体丢失。")
 
     def closeEvent(self, event):
         self.worker.kill()

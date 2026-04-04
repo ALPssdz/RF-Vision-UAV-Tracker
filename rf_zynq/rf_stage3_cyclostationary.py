@@ -1,4 +1,5 @@
 import numpy as np
+from datetime import datetime
 
 class RF_Stage3_CycloAudit:
     """
@@ -56,8 +57,7 @@ class RF_Stage3_CycloAudit:
         # 执行“特指 Alpha” 降维扫描而不是全平面扫！
         score_wifi = self._compute_alpha_slice(iq_audit, self.alpha_wifi)
         score_drone = self._compute_alpha_slice(iq_audit, self.alpha_drone1)
-        
-        print(f"👉 循环谱提取得分：[WiFi指纹: {score_wifi:.4f}] | [Drone指纹: {score_drone:.4f}]")
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] 循环谱分量量化 -> [宽带底噪 (Wi-Fi): {score_wifi:.4f}] | [目标驻留特征 (UAV): {score_drone:.4f}]")
         
         # 分类器坚壁清野逻辑：如果无人机特征强度必须至少是 Wi-Fi 底噪特征的 5 倍，且自身具备宏观分量！
         if score_drone > score_wifi * 5.0 and score_drone > 0.0001:

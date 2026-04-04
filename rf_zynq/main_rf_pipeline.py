@@ -62,40 +62,40 @@ class RFToolchain:
         """
         self.cycle_count += 1
         log_lines = []
-        log_lines.append(f"\n======== [侦察回合: {self.cycle_count}] ========")
+        log_lines.append(f"\n======== [系统监测轮次: {self.cycle_count}] ========")
         
         # 【Stage 1】
         time_s1 = time.time()
         active_center_freq = self.stage1_scan.run_sweep_cycle()
         cost_s1 = time.time() - time_s1
-        log_lines.append(f"📡 【S1 扫频】{cost_s1:.2f} s | 猎锁定频: {active_center_freq/1e6} MHz")
+        log_lines.append(f"📡 【S1 能量扫描】耗时 {cost_s1:.2f} s | 活跃中心频率: {active_center_freq/1e6} MHz")
         
         # 【Stage 2】
         time_s2 = time.time()
         waterfall_tensor = self.stage2_vision.generate_waterfall_tensor(active_center_freq)
         yolo_flag, bbox_score, annotated_frame = active_yolo_inference(self.brain_yolo, waterfall_tensor)
         cost_s2 = time.time() - time_s2
-        log_lines.append(f"👁️ 【S2 凝视与视觉】{cost_s2:.2f} s | AI判别: {yolo_flag} (分数 {bbox_score:.4f})")
+        log_lines.append(f"👁️ 【S2 频段驻留与推断】耗时 {cost_s2:.2f} s | 模型判别: {yolo_flag} (置信度 {bbox_score:.4f})")
         
         alert_flag = False
         
         # 【Stage 3】
         alert_info = {}
         if yolo_flag:
-            log_lines.append("🚨 YOLO 判定威胁！进入底层 S3 审计逻辑...")
+            log_lines.append("⚠️ 视觉模型触发正向判别，移交至 S3 模块进行循环谱特征二次校验...")
             time_s3 = time.time()
             confirm_flag, audit_score = self.stage3_audit.run_spectral_audit(self.stage1_scan.sdr)
             cost_s3 = time.time() - time_s3
-            log_lines.append(f"🧠 【S3 循环谱审计】{cost_s3:.2f} s | 结论: {confirm_flag} (分数 {audit_score:.4f})")
+            log_lines.append(f"🧠 【S3 算法校验】耗时 {cost_s3:.2f} s | 循环特征峰值判定: {confirm_flag} (量度数值 {audit_score:.4f})")
             
             if confirm_flag:
-                log_lines.append(f"🎯 [最高警报]: 发现非法入侵无人机！(频段: {active_center_freq/1e6} MHz)")
+                log_lines.append(f"🎯 [系统告警]: 捕捉到高置信度无人机目标射频信号！(中心频率: {active_center_freq/1e6} MHz)")
                 alert_flag = True
                 alert_info = {"freq_mhz": active_center_freq / 1e6, "score": bbox_score}
                 
                 import cv2
-                cv2.putText(annotated_frame, "[S3 CONFIRM] DRONE!", (20, 60), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 0, 255), 3)           
+                cv2.putText(annotated_frame, "CONFIRMED: UAV SIGNAL", (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 0, 255), 3)           
             else:
-                log_lines.append(f"👻 [虚警排除]: 循环谱特征提取证明，这是一股强Wi-Fi信号，不予报警。")
+                log_lines.append(f"🛡️ [误报抑制]: 循环谱分析表明该频段呈现宽带 OFDM 环境底噪特征 (如 Wi-Fi)，已主动规避告警。")
                 
         return annotated_frame, "\n".join(log_lines), alert_flag, alert_info
