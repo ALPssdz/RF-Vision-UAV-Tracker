@@ -5,23 +5,25 @@ import cv2
 from datetime import datetime
 
 class DBManager:
+    """
+    Data Persistence Adapter.
+    Handles physical file I/O operations and SQLite table management for the synthesized multi-modal evidential records.
+    All runtime databases and image caches are maintained within this localized module directory to ensure encapsulation.
+    """
     def __init__(self, db_filename="rf_alert_history.db", img_dirname="alert_images"):
-        # 获取当前模块同一级物理路径 (即 database/ 文件夹)
+        # Localize the storage paths strictly within the 'database' semantic folder
         self.module_dir = os.path.dirname(os.path.abspath(__file__))
         
-        # 退回上层找到真正的 rf_zynq 根目录存放图片与库，保持代码包纯洁
-        self.root_dir = os.path.dirname(self.module_dir)
+        self.db_path = os.path.join(self.module_dir, db_filename)
+        self.img_dir = os.path.join(self.module_dir, img_dirname)
         
-        self.db_path = os.path.join(self.root_dir, db_filename)
-        self.img_dir = os.path.join(self.root_dir, img_dirname)
-        
-        # 不存在照片文件夹则创建
         if not os.path.exists(self.img_dir):
             os.makedirs(self.img_dir)
             
         self._init_tables()
 
     def _init_tables(self):
+        """ Initializes the database relations and schemas for sequential event logs. """
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         cursor.execute('''
@@ -38,20 +40,18 @@ class DBManager:
 
     def log_alert(self, freq_mhz, score, bgr_image):
         """
-        物理落盘：将传来的彩图硬写到硬盘，并把记录推入数据库。
-        返回生成的那条库记录的自增 ID。
+        Commits a generated multi-modal event snapshot to the file system and registers its metadata sequentially.
+        Returns the auto-incremented primary key of the new transaction log.
         """
         now = datetime.now()
-        # 给人看的时间
         timestamp_str = now.strftime("%Y-%m-%d %H:%M:%S")
-        # 拼接文件名里的时间
         timestamp_file = now.strftime("%Y%m%d_%H%M%S")
         ms = int((time.time() % 1) * 1000)
         
         filename = f"UAV_Intercept_{freq_mhz}MHz_{timestamp_file}_{ms}.jpg"
         absolute_img_path = os.path.join(self.img_dir, filename)
         
-        # 用 OpenCV 暴力写入 JPG 存根
+        # Serialize the matrix to disk
         cv2.imwrite(absolute_img_path, bgr_image)
         
         conn = sqlite3.connect(self.db_path)
@@ -69,8 +69,9 @@ class DBManager:
 
     def get_all_alerts(self):
         """
-        供 GUI 无脑获取所有历史数据的接口。按时间倒序（最新的在上头）。
-        返回列表[(id, timestamp, freq, score, image_path), ...]
+        Extracts all historical alert rows ordered in descending chronology.
+        Provides a data population feed for decoupled presentation entities (View Layer).
+        Returns a list of tuples: [(id, timestamp, freq, score, image_path), ...]
         """
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
