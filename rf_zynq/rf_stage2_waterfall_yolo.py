@@ -26,14 +26,23 @@ class RF_Stage2_Dwell:
         
         # 色度灰度化映射限度，防止极大的尖峰让底噪全部沉沦为黑色影响 YOLO 判断
         # 可视化参数与前 sdr_burst2 兼容
-        self.vmin = 53
-        self.vmax = 108
+        self.vmin = -70
+        self.vmax = 30
 
     def _convert_to_1d_pooled_db(self, complex_iq):
         """
         进行 FFT 运算并将 16384 个频点通过最大池化坍缩到 640 个宽度的物理块
         """
-        windowed_data = complex_iq * self.window
+        # ==============================================================
+        # 🚨 极其致命的底层物理硬件差异补丁！
+        # 训练基底用的 USRP 数据是最高为 1.0 的归一化浮点数，最高功率仅 30dB。
+        # 而实时抓取的 PlutoSDR 返回的是 [-32768, +32767] 的超大整型！
+        # 若不在此处除以 32768.0 归一化，其算出的计算功率将高达 +130dB 以上！
+        # 导致所有数值强行破顶 vmax(30)，将热红外图全部烧成了死白！
+        # ==============================================================
+        normalized_iq = complex_iq / 32768.0 
+        
+        windowed_data = normalized_iq * self.window
         fft_data = np.fft.fftshift(np.fft.fft(windowed_data))
         power_db = 20 * np.log10(np.abs(fft_data) + 1e-12)
         
@@ -72,13 +81,17 @@ class RF_Stage2_Dwell:
         # 归一化为 0-255 灰度单通道张量 (模拟图像，但不写盘)
         # 灰度计算公式：(DB - vmin) / (vmax - vmin) * 255
         waterfall_clipped = np.clip(waterfall, self.vmin, self.vmax)
-        waterfall_norm = ((waterfall_clipped - self.vmin) / (self.vmax - self.self_vmin if hasattr(self, 'self_vmin') else (self.vmax - self.vmin)) * 255.0)
+        waterfall_norm = ((waterfall_clipped - self.vmin) / (self.vmax - self.vmin) * 255.0)
         waterfall_uint8 = waterfall_norm.astype(np.uint8)
         
-        print(f"✅ 张量生成就绪，凝视耗时: {cost:.3f} s，尺寸: {waterfall_uint8.shape}")
+        # ★ 极其关键的一步：将 numpy 的黑白张量用底层 C++ API 洗成 HOT 配色的 3 通道 BGR 张量
+        import cv2
+        waterfall_bgr = cv2.applyColorMap(waterfall_uint8, cv2.COLORMAP_HOT)
         
-        # 这里可以直接将 waterfall_uint8 转为 ONNX Tensor 或者丢给 RKNN API 
-        return waterfall_uint8
+        print(f"✅ 张量生成就绪，凝视耗时: {cost:.3f} s，尺寸: {waterfall_bgr.shape}")
+        
+        # 直接将 waterfall_bgr 转给 YOLO 或者 RKNN API 执行推断
+        return waterfall_bgr
         
 if __name__ == "__main__":
     from rf_stage1_sweeper import RF_Stage1_Sweeper

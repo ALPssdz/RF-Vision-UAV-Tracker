@@ -56,7 +56,10 @@ class RF_Stage1_Sweeper:
         # 由于写入底层寄存器存在硬件锁相所需时间(t_tune约30ms)，在切频后扔掉前两包残存的缓冲
         _ = self.sdr.rx()
         _ = self.sdr.rx()
-        data_a = self.sdr.rx()
+        
+        # [高级调校]: 根据您的建议，扩大能量“积分池”！
+        # 连抓 20 包以平滑抹除偶然的脉冲毛刺，延长锁定耗时到 0.05~0.1s 级别
+        data_a = np.concatenate([self.sdr.rx() for _ in range(20)])
         rssi_a = self.compute_rssi_db(data_a)
         
         # ==========================================
@@ -65,7 +68,9 @@ class RF_Stage1_Sweeper:
         self.sdr.rx_lo = self.freq_segment_b
         _ = self.sdr.rx()
         _ = self.sdr.rx()
-        data_b = self.sdr.rx()
+        
+        # 同样收集长达 20 包的数据链作能量底噪均值
+        data_b = np.concatenate([self.sdr.rx() for _ in range(20)])
         rssi_b = self.compute_rssi_db(data_b)
         
         # ==========================================

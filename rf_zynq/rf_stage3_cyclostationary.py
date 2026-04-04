@@ -15,23 +15,27 @@ class RF_Stage3_CycloAudit:
         # 例如：假设目标图传底层调制使用了某种特定的循环前缀或是 250kHz/500kHz 频带包络基波
         # Alpha频率对应公式: alpha_discrete = alpha_Hz / sample_rate * 2 * pi
         
-        # 为了演示，此处添加两组典型特异指纹 Alpha
-        self.alpha_wifi = 250e3      # 取 250kHz OFDM 典型子带
-        self.alpha_drone1 = 500e3    # 取 500kHz 未知私有图传假定特征
+        # 【物理真相】：802.11 a/g/n/ac Wi-Fi 的标准 OFDM 子载波间隔 (Subcarrier Spacing) 是严丝合缝的 312.5 kHz (20MHz宽/64)，这是它的基因！
+        self.alpha_wifi = 312.5e3      
+        # 未知无人机图传大概率不会使用公开碰瓷的 312.5，我们暂定一个隔离点特征
+        self.alpha_drone1 = 500.0e3
         
     def _compute_alpha_slice(self, complex_iq, alpha_hz):
         """
         按照一维滑动降频算法计算特定切片上的协方差强度：
         R_x^alpha(0) = 1/M * sum_m ( x(m) * x*(m) * exp(-j * 2pi * alpha_hz * m / Fs) )
         """
-        N = len(complex_iq)
+        # 将局域网 SDR 原始 int16 数据化压为物理浮点数，免得溢出天际
+        normalized_iq = complex_iq / 32768.0
+        
+        N = len(normalized_iq)
         # 生成时间乘子数组: 0, 1, 2, ..., N-1
         m_array = np.arange(N)
         # 生成基于特定循环频率 alpha 的移频复指数: exp(-j * 2pi * alpha * t)
         phase_shift = np.exp(-1j * 2.0 * np.pi * alpha_hz * m_array / self.sample_rate)
         
         # 计算瞬时功率 x(m)*x*(m) 即为幅度平方，再乘以对应的移频指数
-        power_shifted = (np.abs(complex_iq) ** 2) * phase_shift
+        power_shifted = (np.abs(normalized_iq) ** 2) * phase_shift
         
         # 求平均特征模量作为此参数下的钻石点密度
         score = np.abs(np.mean(power_shifted))
@@ -55,8 +59,8 @@ class RF_Stage3_CycloAudit:
         
         print(f"👉 循环谱提取得分：[WiFi指纹: {score_wifi:.4f}] | [Drone指纹: {score_drone:.4f}]")
         
-        # 分类器逻辑：如果图传特异点的相关强度彻底压制了 WiFi 常模
-        if score_drone > score_wifi * 1.5 and score_drone > 0.001:
+        # 分类器坚壁清野逻辑：如果无人机特征强度必须至少是 Wi-Fi 底噪特征的 5 倍，且自身具备宏观分量！
+        if score_drone > score_wifi * 5.0 and score_drone > 0.0001:
             return True, score_drone
         else:
             return False, score_wifi

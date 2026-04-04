@@ -1,6 +1,6 @@
 # 忽略超大型数据集与缓存文件夹，防止塞爆 GitHub
 Drone RF Data/
-yolo_dataset/
+rf_yolo_dataset/
 
 # 忽略 YOLO 训练全过程日志、模型输出与 Ultralytics 缓存
 runs/
