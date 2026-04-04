@@ -49,8 +49,13 @@ class RF_Stage3_CycloAudit:
         score_drone = self._compute_alpha_slice(iq_audit, self.alpha_drone1)
         
         # 三相分类裁定网络决策分类模型层树：
-        # 无人机实体物理谱系生成特征辐射能量需通过绝对尺度放缩约束压制越级环境宽带底噪基础度量指标范围安全度通过确认。
-        if score_drone > score_wifi * 5.0 and score_drone > 0.0001:
+        # 根据物理学时变自相关函数叠加原理（Cyclostationary Orthogonality）:
+        # 当空间中存在 x(t) = s_wifi(t) + s_drone(t) + noise(t) 时，
+        # 由于两种调制机制独立，其在 alpha_drone = 500kHz 处的循环自相关分量 R_x^alpha 等于无人机的单峰独立值。
+        # 故不应采用比值抑制（那会导致共存时漏警），而应采用独立的频域本底特征阈值隔离法：
+        
+        # 建立动态分离常界：无人机特征分量须表现为强凸性(>0.00015)，且不为底噪本身的抖动。
+        if score_drone > 0.00015:
             return True, score_drone
         else:
             return False, score_wifi
