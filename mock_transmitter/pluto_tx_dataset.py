@@ -56,7 +56,7 @@ def main():
     # 定义发射管线约束
     sdr.sample_rate = int(40e6)
     sdr.tx_rf_bandwidth = int(40e6)
-    sdr.tx_lo = int(2450e6)          # 恢复原始物理特征截获频点 (2.45 GHz)
+    sdr.tx_lo = int(2420e6)          # 恢复原始物理特征截获频点 (2.45 GHz)
     sdr.tx_hardwaregain_chan0 = -5   # 加大火力，以压制环境底噪凸显数据集本体能量
     
     # ★ 使用 FPGA 级硬件内存闭环，不断重复这段图传录音

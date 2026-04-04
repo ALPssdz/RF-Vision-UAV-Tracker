@@ -36,6 +36,9 @@ class RF_Stage2_Dwell:
         # 为符合 (-70, 30) dB 分界量程尺度，必需施加强制除法偏移约简 / 32768.0 的算术除以消除大量热图严重过白曝光突起特征的显现。
         # ==============================================================
         normalized_iq = complex_iq / 32768.0 
+        # [极为关键的防爆盾] 拔除硬件本振直流泄漏！
+        # 如果不减均值，屏幕正中间会被永远点亮一条宽轨黄线，导致 YOLO 的分类神经元错乱。
+        normalized_iq = normalized_iq - np.mean(normalized_iq)
         
         windowed_data = normalized_iq * self.window
         fft_data = np.fft.fftshift(np.fft.fft(windowed_data))

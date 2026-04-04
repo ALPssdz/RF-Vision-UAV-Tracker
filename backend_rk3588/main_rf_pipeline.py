@@ -1,4 +1,3 @@
-from rf_zynq.rf_stage1_sweeper import RF_Stage1_Sweeper
 from rf_zynq.rf_stage2_waterfall_yolo import RF_Stage2_Dwell
 from rf_zynq.rf_stage3_cyclostationary import RF_Stage3_CycloAudit
 import time
@@ -41,65 +40,93 @@ def active_yolo_inference(model, tensor_bgr):
 
 class RFToolchain:
     """
-    核心射频处理控制管道的类封装实现，整合三阶梯级的认知检测算法流程。
+    极简全链路视觉轮询中枢（Round-Robin S2+S3 架构）。
+    废弃 S1 的能量盲猜，由中心直接驱动双频带雷达式切片式驻留，交由 YOLO 视觉裁决。
     """
-    def __init__(self):
-        self.stage1_scan = RF_Stage1_Sweeper()
-        self.stage1_scan.initialize_sdr()
-        
+    def __init__(self, uri="ip:192.168.31.10"):
+        import adi
+        try:
+            self.sdr = adi.Pluto(uri)
+            self.sample_rate = int(40e6)
+            self.sdr.sample_rate = self.sample_rate
+            self.sdr.rx_rf_bandwidth = self.sample_rate
+            self.sdr.rx_buffer_size = 16384
+            
+            # [全局降饱和物理防爆盾] 锁死 0dB
+            self.sdr.rx_hardwaregain_control_mode = 'manual'
+            self.sdr.rx_hardwaregain_chan0 = 0
+            print("[INFO] RFToolchain: PlutoSDR Engine Hardware Initialized Successfully. LNA protected.")
+        except Exception as e:
+            print(f"[ERROR] RFToolchain: SDR Initialization Failed: {e}")
+            raise e
+            
         self.brain_yolo = load_yolo_model()
         
-        self.stage2_vision = RF_Stage2_Dwell(self.stage1_scan.sdr)
-        self.stage3_audit = RF_Stage3_CycloAudit(sample_rate=self.stage1_scan.sample_rate)
+        self.stage2_vision = RF_Stage2_Dwell(self.sdr)
+        self.stage3_audit = RF_Stage3_CycloAudit(sample_rate=self.sample_rate)
+        
+        # 建立硬核的“相控阵交替扫描扇区”
+        self.sweep_sectors = [2420e6, 2460e6]
+        self.current_sector_idx = 0
         
         self.cycle_count = 0
 
     def tick(self):
         """
-        发起一次完整的宏观软硬件联合周期巡检调用。
+        发起一次雷达轮询截面推断。
         返回: 带有边框标注的光栅图像矩阵，状态日志组，以及告警判定布尔级标量及附带属性字典。
         """
         self.cycle_count += 1
         log_lines = []
-        log_lines.append(f"\n======== [System Cycle Execution: {self.cycle_count}] ========")
         
-        # [第一级触发检测梯次: 射频底噪宽带能量谱切片扫描]
-        time_s1 = time.time()
-        active_center_freq = self.stage1_scan.run_sweep_cycle()
-        cost_s1 = time.time() - time_s1
-        log_lines.append(f"[S1 - 频段能量扫描提取]: 执行耗时 {cost_s1:.2f} 秒 | 判定中心峰值候选频频率: {active_center_freq/1e6} MHz")
+        # 取出本次轮询的物理频段目标
+        active_center_freq = self.sweep_sectors[self.current_sector_idx]
+        self.current_sector_idx = (self.current_sector_idx + 1) % len(self.sweep_sectors)
         
-        # [第二级触发检测梯次: 锁相凝视捕获及视觉张量推断分类]
+        log_lines.append(f"\n======== [Round-Robin Pulse: {self.cycle_count} | Sector: {active_center_freq/1e6} MHz] ========")
+        
+        # 【物理强制时空阻断】
+        # 切频并彻底摧毁上一个扇区的 Linux 底层残余 USB 缓冲！
+        time_tune = time.time()
+        self.sdr.rx_lo = int(active_center_freq)
+        time.sleep(0.04)
+        self.sdr.rx_destroy_buffer()
+        log_lines.append(f"[Hardware Phase-Lock]: LO 跳频至 {active_center_freq/1e6} MHz 并完成缓冲物理销毁, 耗时 {time.time()-time_tune:.2f} 秒")
+        
+        # [极简新梯次 1 (原 S2): 驻留绘制与视觉判决]
         time_s2 = time.time()
         waterfall_tensor = self.stage2_vision.generate_waterfall_tensor(active_center_freq)
         yolo_flag, bbox_score, annotated_frame = active_yolo_inference(self.brain_yolo, waterfall_tensor)
         cost_s2 = time.time() - time_s2
-        log_lines.append(f"[S2 - 目标凝视锁定特征提取]: 执行耗时 {cost_s2:.2f} 秒 | 目标标量识别判定状态: {yolo_flag} (网络置信度评价: {bbox_score:.4f})")
+        
+        # 在屏幕和日志上打上大大的频点标识，防伪识别
+        import cv2
+        cv2.putText(annotated_frame, f"SECTOR: {active_center_freq/1e6} MHz", (10, 30), cv2.FONT_HERSHEY_DUPLEX, 0.8, (0, 255, 0), 2)
+        
+        log_lines.append(f"[S2 - 视觉驻留捕捉]: 执行耗时 {cost_s2:.2f} 秒 | 目标识别状态: {yolo_flag} (YOLO置信度: {bbox_score:.4f})")
         
         alert_flag = False
         alert_info = {}
         
-        # [第三级触发检测梯次: 基于高层抽象谱学的二次假阳性审计复刻]
+        # [极简新梯次 2 (原 S3): OcuSync 物理层审计]
         if yolo_flag:
-            log_lines.append("张量判定约束触发跨层协议通过，正移交 S3 模块请求基带循环谱特征校验...")
+            log_lines.append("张量视觉触发告警！系统自动唤醒 S3 协议级特征审计器...")
             time_s3 = time.time()
-            confirm_flag, audit_score = self.stage3_audit.run_spectral_audit(self.stage1_scan.sdr)
+            confirm_flag, audit_score = self.stage3_audit.run_spectral_audit(self.sdr)
             cost_s3 = time.time() - time_s3
-            log_lines.append(f"[S3 - 底层协议级数理特征审计]: 矩阵收敛耗时 {cost_s3:.2f} 秒 | 谱学核验判定结果: {confirm_flag} (幅值量级量度: {audit_score:.4f})")
+            log_lines.append(f"[S3 - 物理自相关审计]: 收敛耗时 {cost_s3:.2f} 秒 | 核验结果: {confirm_flag} (基带循环特征幅值: {audit_score:.4f})")
             
             if confirm_flag:
-                log_lines.append(f"CRITICAL [True Positive]: 基于三轴向立体特征判定锁定入侵信源！记录频率节点 {active_center_freq/1e6} MHz。")
+                log_lines.append(f"CRITICAL [True Positive]: YOLO视觉与物理基带双重锁定黑飞无人机！频点: {active_center_freq/1e6} MHz。")
                 alert_flag = True
                 alert_info = {"freq_mhz": active_center_freq / 1e6, "score": bbox_score}
-                
-                import cv2
-                cv2.putText(annotated_frame, "CONFIRMED: UAV SIGNAL", (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 0, 255), 3)           
+                cv2.putText(annotated_frame, "CONFIRMED: UAV LOCK!", (10, 70), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 0, 255), 3)           
             else:
-                log_lines.append(f"SYSTEM [False Positive Subdued]: 数理判决标定系统发现 OFDM 结构调制泛型特征环境载波噪音，截断预警投递。")
+                log_lines.append(f"SYSTEM [False Positive Subdued]: S3 驳回了此次视觉告警，判定为环境干扰伪影。")
                 
         if alert_flag:
-            log_lines.append("<span style='color: #ff3333; font-weight: bold;'>【最终系统综合判定结论】: 判定：检测到无人机</span>")
+            log_lines.append("<span style='color: #ff3333; font-weight: bold;'>【本帧最终判定】: 红色告警 - 猎杀网合围！</span>")
         else:
-            log_lines.append("【最终系统综合判定结论】: 判定：未检测到无人机")
+            log_lines.append("【本帧最终判定】: 扇区未发现实质性入侵。")
                 
         return annotated_frame, "\n".join(log_lines), alert_flag, alert_info

@@ -10,52 +10,83 @@ class RF_Stage3_CycloAudit:
     """
     def __init__(self, sample_rate=40e6):
         self.sample_rate = sample_rate
-        
-        # --- 循环谱核心关联维度分析降维方程提取规则基座 ---
-        # Matrix S(f, alpha) 执行全面扫场遍历计算耗能负载极为庞大 (O(N^2 logN))。
-        # 实装采取物理推离孤立校验验证：以具有唯一确定性已知通信步长移项直接验证提取特征预标记值 alpha_target。
-        
-        # 系统公钥基础特性: IEEE 802.11 发行系内网通讯基于正交往返分布机制，子通道规范约束有明文绝对值
-        # 执行标定间隔约束指标为恒定量：312.5 kHz 间限波道。
-        self.alpha_wifi = 312.5e3      
         self.alpha_drone1 = 500.0e3
         
+        # 【算法纠错升级】：DJI OcuSync 使用的是标准的物理层 OFDM 架构。
+        # 样本延迟常数计算 (Fs = 40MHz)：
+        # Wi-Fi 4/5/6 (802.11g/n/ac): 子载波 312.5kHz => T_u = 3.2微秒 => 延迟样本数 = 128
+        # OcuSync 15kHz 子载波: 符号域长度 = 1/15kHz = 66.67微秒 => 延迟样本数 = 2667
+        # OcuSync 30kHz 子载波: 符号域长度 = 1/30kHz = 33.33微秒 => 延迟样本数 = 1333
+        self.delay_wifi_cp = 128
+        self.delay_ocusync_15k = 2667
+        self.delay_ocusync_30k = 1333
+
     def _compute_alpha_slice(self, complex_iq, alpha_hz):
-        """
-        实行计算单维频宽空间域发生特定距离推位的协方差幅值度量的内联演算逻辑执行核心。
-        算法理论等价基态：R_x^alpha(0) = 1/M * sum_m ( x(m) * x*(m) * exp(-j * 2pi * alpha_hz * m / Fs) )
-        """
+        # 针对老式调幅遥控图传适用的零延迟包络谱积分
         normalized_iq = complex_iq / 32768.0
-        
         N = len(normalized_iq)
         m_array = np.arange(N)
         phase_shift = np.exp(-1j * 2.0 * np.pi * alpha_hz * m_array / self.sample_rate)
-        
         power_shifted = (np.abs(normalized_iq) ** 2) * phase_shift
+        cyclic_amplitude = np.abs(np.mean(power_shifted))
+        total_power = np.mean(np.abs(normalized_iq) ** 2) + 1e-12
+        return cyclic_amplitude / total_power
         
-        score = np.abs(np.mean(power_shifted))
-        return score
+    def _compute_cp_correlation(self, complex_iq, delay_samples):
+        """
+        【真理方程】：OFDM 循环协议克星！(基于时移自相关 Delayed Autocorrelation)
+        提取任何伪装在白噪声下的无人机 OcuSync 基带特征。
+        """
+        normalized_iq = complex_iq / 32768.0
+        
+        # 扣除物理硬件级直流失调(DC Offset)与本振泄漏(LO Leakage)
+        normalized_iq = normalized_iq - np.mean(normalized_iq)
+        
+        if len(normalized_iq) <= delay_samples: return 0.0
+            
+        iq_main = normalized_iq[delay_samples:]
+        iq_delayed = normalized_iq[:-delay_samples]
+        
+        correlation = np.abs(np.mean(iq_main * np.conj(iq_delayed)))
+        power_main = np.mean(np.abs(iq_main) ** 2) + 1e-12
+        return correlation / power_main
         
     def run_spectral_audit(self, sdr_instance):
-        """
-        触发进入低层次物理原相协议侦测检查管线通道。
-        条件分支规则受限于前置依赖网络：通常需要强制在获胜通过上级梯队 Tier2 视觉判定高风险信置后置位启用关联处理池。
-        """
         _ = sdr_instance.rx()
         
-        iq_audit = np.concatenate([sdr_instance.rx() for _ in range(4)])
+        # 【大数定律压制方差】
+        # 将取样区间暴增至 12 帧，根据高斯分布方差缩小原则，环境底噪将被熨平压死在极其稳定的极低基线上！
+        iq_audit = np.concatenate([sdr_instance.rx() for _ in range(12)])
         
-        score_wifi = self._compute_alpha_slice(iq_audit, self.alpha_wifi)
         score_drone = self._compute_alpha_slice(iq_audit, self.alpha_drone1)
+        score_wifi_cp = self._compute_cp_correlation(iq_audit, self.delay_wifi_cp)
+        score_cp_15k = self._compute_cp_correlation(iq_audit, self.delay_ocusync_15k)
+        score_cp_30k = self._compute_cp_correlation(iq_audit, self.delay_ocusync_30k)
         
-        # 三相分类裁定网络决策分类模型层树：
-        # 根据物理学时变自相关函数叠加原理（Cyclostationary Orthogonality）:
-        # 当空间中存在 x(t) = s_wifi(t) + s_drone(t) + noise(t) 时，
-        # 由于两种调制机制独立，其在 alpha_drone = 500kHz 处的循环自相关分量 R_x^alpha 等于无人机的单峰独立值。
-        # 故不应采用比值抑制（那会导致共存时漏警），而应采用独立的频域本底特征阈值隔离法：
+        print(f"      >> [S3 矩阵校验] Wi-Fi包({score_wifi_cp*100:.1f}%) | 传统AM({score_drone*100:.1f}%) | O4(15k)={score_cp_15k*100:.2f}% | O4(30k)={score_cp_30k*100:.2f}%")
         
-        # 建立动态分离常界：无人机特征分量须表现为强凸性(>0.00015)，且不为底噪本身的抖动。
-        if score_drone > 0.00015:
+        # =========================================================================
+        # 【物理正交双峰定律】
+        # 真正的 DJI 图传因为带着 OFDM 数据负载，当延迟到达两倍（15k 对应的 2667 步）时，
+        # 无人机在这个跨度已经是完全随机的两个符号，相关性必然彻底崩塌！
+        # 如果 15k 和 30k 都在极高位共振，说明这只是一个无意义的长连续单频环境干扰！
+        # =========================================================================
+        
+        # O4宽频(30k) 必须作为主物理矛点突破动态防爆阈值
+        dynamic_th_30k = max(0.060, score_wifi_cp * 0.35)
+        
+        # 并发极值衰减定律：15k 的残留波必须小于 30k 一半以上，否则视为连续干扰谐波
+        is_true_ocusync = score_cp_30k > dynamic_th_30k and score_cp_15k < (score_cp_30k * 0.55)
+        
+        if is_true_ocusync:
+            return True, score_cp_30k
+            
+        elif score_drone > 0.055:
             return True, score_drone
+            
+        elif score_wifi_cp > 0.040:
+            print(f"      >> [S3 诊断报告] 协议拦截！命中极强 IEEE 802.11 OFDM 背景包裹。")
+            return False, score_wifi_cp
+            
         else:
-            return False, score_wifi
+            return False, score_wifi_cp
