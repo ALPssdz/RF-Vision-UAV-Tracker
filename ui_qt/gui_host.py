@@ -1,5 +1,14 @@
 import torch # 在第一行极其强势地霸占 C++ DLL 底层加载入口！
 import sys
+import os
+
+# -------- [重大环境修补 / 环境路径挂载] --------
+# 强行抢占将根目录 rf_zynq 压入系统级搜寻链路，如此才能实现跨包拉取依赖物。
+PROJ_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if PROJ_ROOT not in sys.path:
+    sys.path.insert(0, PROJ_ROOT)
+# ---------------------------------------------
+
 import time
 import cv2
 import numpy as np
@@ -8,8 +17,8 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QTabWidget, QTableWidget, QTableWidgetItem, QHeaderView)
 from PyQt5.QtCore import QThread, pyqtSignal, Qt
 from PyQt5.QtGui import QImage, QPixmap
-from main_rf_pipeline import RFToolchain
-from db_manager import DBManager
+from backend_rk3588.main_rf_pipeline import RFToolchain
+from database.db_manager import DBManager
 
 class RFPipelineWorker(QThread):
     frame_ready = pyqtSignal(np.ndarray)

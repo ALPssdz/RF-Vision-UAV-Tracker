@@ -6,10 +6,14 @@ from datetime import datetime
 
 class DBManager:
     def __init__(self, db_filename="rf_alert_history.db", img_dirname="alert_images"):
-        # 获取当前模块同一级物理路径
-        self.base_dir = os.path.dirname(os.path.abspath(__file__))
-        self.db_path = os.path.join(self.base_dir, db_filename)
-        self.img_dir = os.path.join(self.base_dir, img_dirname)
+        # 获取当前模块同一级物理路径 (即 database/ 文件夹)
+        self.module_dir = os.path.dirname(os.path.abspath(__file__))
+        
+        # 退回上层找到真正的 rf_zynq 根目录存放图片与库，保持代码包纯洁
+        self.root_dir = os.path.dirname(self.module_dir)
+        
+        self.db_path = os.path.join(self.root_dir, db_filename)
+        self.img_dir = os.path.join(self.root_dir, img_dirname)
         
         # 不存在照片文件夹则创建
         if not os.path.exists(self.img_dir):

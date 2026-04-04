@@ -1,6 +1,6 @@
-from rf_stage1_sweeper import RF_Stage1_Sweeper
-from rf_stage2_waterfall_yolo import RF_Stage2_Dwell
-from rf_stage3_cyclostationary import RF_Stage3_CycloAudit
+from rf_zynq.rf_stage1_sweeper import RF_Stage1_Sweeper
+from rf_zynq.rf_stage2_waterfall_yolo import RF_Stage2_Dwell
+from rf_zynq.rf_stage3_cyclostationary import RF_Stage3_CycloAudit
 import time
 
 def load_yolo_model():
@@ -9,7 +9,10 @@ def load_yolo_model():
     import os, glob
     
     # 动态抓取 yolo_train 文件夹下最新的 detect/train*/weights/best.pt
-    search_path = os.path.join(os.path.dirname(__file__), "yolo", "runs", "detect", "*", "weights", "best.pt")
+    # 环境已被移动至项目绝对根目录下的 backend_rk3588 子包，所以向前退一层便是项目总根目录
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    # 我们知道先前的权重是保留在旧的 rf_zynq 测试堆栈里的
+    search_path = os.path.join(project_root, "rf_zynq", "yolo", "runs", "detect", "*", "weights", "best.pt")
     matches = glob.glob(search_path)
     if not matches:
         raise FileNotFoundError("没有找到 best.pt，您确定模型练完了吗？")
