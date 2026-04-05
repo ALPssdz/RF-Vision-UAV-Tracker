@@ -13,7 +13,7 @@
 ## 1. Introduction
 RF-Vision-UAV-Tracker is a distributed, multi-modal Unmanned Aerial Vehicle (UAV) detection and early-warning system. By integrating Software-Defined Radio (SDR) with edge-computing optical vision, this system addresses the inherent limitations of single-sensor detection methodologies (e.g., localized blind spots and vulnerability to radio silence). It employs an asymmetric Out-Of-Band (OOB) sensor fusion architecture to achieve robust target acquisition and evidentiary logging in complex electromagnetic environments.
 
-The central controller runs on **Orange Pi 5 (RK3588)**, leveraging the onboard **NPU (Neural Processing Unit)** via RKNN-Toolkit2 to execute hardware-accelerated YOLOv8 inference on the RF spectrogram stream, achieving ~20–40 ms per frame latency — approximately 10× faster than CPU-only inference.
+The central controller runs on **Orange Pi 5 (RK3588)**, leveraging the onboard **NPU (Neural Processing Unit)** via RKNN-Toolkit2 to execute hardware-accelerated YOLOv8 inference on the RF spectrogram stream, delivering significantly better real-time performance than CPU-only inference.
 
 ## 2. System Architecture
 The hardware topology is established upon a Gigabit Ethernet LAN, interconnecting three decoupled physical nodes:
