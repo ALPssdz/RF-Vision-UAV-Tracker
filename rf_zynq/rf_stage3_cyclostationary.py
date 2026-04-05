@@ -209,7 +209,7 @@ class RF_Stage3_CycloAudit:
                 try:
                     import matplotlib
                     matplotlib.use('Agg')
-                    matplotlib.rcParams['font.family'] = ['Microsoft YaHei', 'SimHei', 'DejaVu Sans']
+                    matplotlib.rcParams['font.family'] = 'DejaVu Sans'
                     matplotlib.rcParams['axes.unicode_minus'] = False
                     import matplotlib.pyplot as plt
                     import os
@@ -240,9 +240,11 @@ class RF_Stage3_CycloAudit:
                     db_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                           "..", "database", "alert_images")
                     os.makedirs(db_dir, exist_ok=True)
-                    plt.savefig(os.path.join(db_dir, "S3_Cyclo_Snapshot.png"), dpi=120)
+                    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    snap_path = os.path.join(db_dir, f"S3_Cyclo_{ts}.png")
+                    plt.savefig(snap_path, dpi=120)
                     plt.close()
-                    print("  [S3] Snapshot saved → database/alert_images/S3_Cyclo_Snapshot.png")
+                    print(f"  [S3] Snapshot saved → {snap_path}")
                 except Exception as e:
                     print(f"  [S3] Snapshot generation error: {e}")
 

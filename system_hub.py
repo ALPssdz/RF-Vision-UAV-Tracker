@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import torch # [Patch]: 规避 PyTorch 与 PyQt5 的 C++ 动态链接库初始化冲突 (WinError 1114)
 import sys
 import os
@@ -9,9 +10,12 @@ PROJ_ROOT = os.path.dirname(os.path.abspath(__file__))
 if PROJ_ROOT not in sys.path:
     sys.path.insert(0, PROJ_ROOT)
 
-from PyQt5.QtWidgets import QApplication
+from PyQt5.QtCore import Qt, QEvent
+from PyQt5.QtGui import QImage, QPixmap, QFont, QKeySequence
+from PyQt5.QtWidgets import QApplication, QShortcut
 from PyQt5.QtCore import QObject, pyqtSignal
 
+import config as cfg
 from backend_rk3588.main_rf_pipeline import RFToolchain
 from vision_k230.k230_client import K230NetworkClient
 from ui_qt.gui_host import MainWindow
@@ -44,12 +48,15 @@ class CentralHubEngine(QObject):
         
         # 初始化各子系统节点
         self.rf_toolchain = RFToolchain()
-        self.k230_client  = K230NetworkClient(rtsp_url="rtsp://192.168.31.250/stream", udp_port=8080)
+        self.k230_client  = K230NetworkClient(
+            rtsp_url=cfg.K230_RTSP_URL, udp_port=cfg.K230_UDP_PORT
+        )
         self.k230_client.start()
         self.db_engine = DBManager()
 
         self.running        = False
         self._master_thread = None
+        self._tick_lock     = threading.Lock()  # 防止 tick() 在 stop/start 切换时重入
 
         # RF 与视觉通道的最新帧缓存（用于多模态证据融合拼图）
         self.cache_rf  = np.zeros((640, 640, 3),  dtype=np.uint8)
@@ -77,8 +84,6 @@ class CentralHubEngine(QObject):
         self.signal_system_status.emit({"system": "系统模式: 🟡 任务挂起", "color": "#f1c40f"})
         self.signal_log.emit("系统中央主循环进程已安全退出执行。")
         
-    def mock_k230_trigger(self, state):
-        self.k230_client.mock_drone_detected = state
 
     def _trigger_composite_save(self, reason_tag, freq_mhz, score):
         """
@@ -108,27 +113,31 @@ class CentralHubEngine(QObject):
         """
         while self.running:
             # === [处理管线一：软件无线电跳频解调] ===
+            if not self._tick_lock.acquire(blocking=False):
+                time.sleep(0.01)  # 上一次 tick 尚未完成，等待后重试
+                continue
             try:
                 rf_frame, rf_log, rf_alert, rf_info = self.rf_toolchain.tick()
                 self.cache_rf = rf_frame
                 self.signal_rf_frame.emit(rf_frame)
-                
-                if rf_log.strip(): 
+
+                if rf_log.strip():
                     self.signal_log.emit(rf_log)
-                    
+
                 if rf_alert:
                     self.signal_system_status.emit({"system": "⚠️ Alert: OcuSync RF Detected!", "color": "#e74c3c"})
                     freq = rf_info.get("freq_mhz", 0.0)
                     score = rf_info.get("score", 0.0)
                     self._trigger_composite_save("SDR_OMNI_TRIGGER", freq, score)
                 else:
-                    # 正常周期：恢复绿色运行状态（清除上次的红色告警）
                     self.signal_system_status.emit({
                         "system": f"系统状态: 🟢 扫描中 ({rf_info.get('freq_mhz', 0):.0f}MHz)" if rf_info else "系统状态: 🟢 主管道全速扫描中...",
                         "color": "#27ae60"
                     })
             except Exception as e:
                 self.signal_log.emit(f"SDR 射频传感器寻址异常: {e}")
+            finally:
+                self._tick_lock.release()
                 
             # === [处理管线二：带外信令网络及边缘端光学流] ===
             try:
@@ -159,7 +168,7 @@ class CentralHubEngine(QObject):
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     hub = CentralHubEngine()
-    hub.ui_window.show()
+    hub.ui_window.showFullScreen()
     
     exit_code = app.exec_()
     hub.shutdown()

@@ -8,7 +8,7 @@ S3 误报根因诊断工具 (False Positive Root-Cause Analyzer)
 import numpy as np
 import matplotlib
 matplotlib.use('Agg')
-matplotlib.rcParams['font.family'] = ['Microsoft YaHei', 'SimHei', 'DejaVu Sans']
+matplotlib.rcParams['font.family'] = ['WenQuanYi Micro Hei', 'Noto Sans CJK SC', 'Microsoft YaHei', 'SimHei', 'DejaVu Sans']
 matplotlib.rcParams['axes.unicode_minus'] = False
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec

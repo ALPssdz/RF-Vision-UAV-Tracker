@@ -113,3 +113,36 @@ class DBManager:
         rows = cursor.fetchall()
         conn.close()
         return rows
+
+    def clear_all(self) -> int:
+        """
+        清除全部告警记录：
+          1. 删除 alert_images/ 目录下所有图片文件
+          2. 清空 alerts 数据表（保留表结构）
+
+        Returns
+        -------
+        int : 被删除的记录条数
+        """
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        # 获取所有图片路径后统一删除
+        cursor.execute("SELECT image_path FROM alerts")
+        paths = [row[0] for row in cursor.fetchall()]
+        deleted_count = len(paths)
+
+        for img_path in paths:
+            try:
+                if os.path.exists(img_path):
+                    os.remove(img_path)
+            except Exception:
+                pass
+
+        cursor.execute("DELETE FROM alerts")
+        # 重置自增 ID 计数器，使新记录从 1 开始
+        cursor.execute("DELETE FROM sqlite_sequence WHERE name='alerts'")
+        conn.commit()
+        conn.close()
+
+        return deleted_count

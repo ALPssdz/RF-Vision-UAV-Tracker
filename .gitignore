@@ -1,12 +1,25 @@
-# 忽略超大型数据集与缓存文件夹，防止塞爆 GitHub
+# ── 大型数据集（不上传 GitHub）──────────────────────────────
 Drone RF Data/
 rf_yolo_dataset/
 
-# 忽略 YOLO 训练全过程日志、模型输出与 Ultralytics 缓存
+# ── 临时目录 ──────────────────────────────────────────────
+OrangepiVersion/
+rknn_env/
+
+# ── YOLO 训练产物与模型权重 ────────────────────────────────
 runs/
 *.pt
 *.onnx
+*.rknn
 
-# Python 缓存
+# ── 运行时产物（数据库 & 告警截图）────────────────────────
+database/rf_alert_history.db
+database/alert_images/
+
+# ── Python 缓存 ──────────────────────────────────────────
 __pycache__/
 *.pyc
+*.pyo
+
+# ── Windows 开发工具（不需要入库）──────────────────────────
+*.bat

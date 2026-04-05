@@ -1,11 +1,12 @@
 import os
 import cv2
 import numpy as np
-from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, 
+from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout,
                              QHBoxLayout, QPushButton, QLabel, QPlainTextEdit,
-                             QTabWidget, QTableWidget, QTableWidgetItem, QHeaderView)
+                             QTabWidget, QTableWidget, QTableWidgetItem, QHeaderView,
+                             QMessageBox, QShortcut)
 from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QImage, QPixmap, QFont
+from PyQt5.QtGui import QImage, QPixmap, QFont, QKeySequence
 from database.db_manager import DBManager
 
 class MainWindow(QMainWindow):
@@ -28,7 +29,7 @@ class MainWindow(QMainWindow):
         top_layout.setContentsMargins(5, 5, 5, 5)
         
         self.tabs = QTabWidget()
-        self.tabs.setStyleSheet("QTabBar::tab { height: 45px; font-size: 16px; padding: 0 30px; }")
+        self.tabs.setStyleSheet("QTabBar::tab { height: 45px; font-size: 16px; padding: 0 20px; min-width: 280px; }")
         top_layout.addWidget(self.tabs)
         
         self.tab1 = QWidget()
@@ -49,6 +50,10 @@ class MainWindow(QMainWindow):
             self.hub.signal_system_status.connect(self.update_status_labels)
             self.hub.signal_db_updated.connect(self.load_db_data)  # 异步模型同步触发器
 
+        # Esc 键退出全屏（返回最大化窗口模式）
+        esc_shortcut = QShortcut(QKeySequence(Qt.Key_Escape), self)
+        esc_shortcut.activated.connect(self.showMaximized)
+
     def setup_live_dashboard(self):
         main_layout = QVBoxLayout(self.tab1)
         
@@ -57,7 +62,7 @@ class MainWindow(QMainWindow):
         self.lbl_k230_status = QLabel("视频节点: 🟢 就绪 (休眠)")
         self.lbl_fusion_status = QLabel("系统模式: 🟡 待机总控指令")
         for lbl in [self.lbl_rf_status, self.lbl_k230_status, self.lbl_fusion_status]:
-            lbl.setFont(QFont("Microsoft YaHei", 12, QFont.Bold))
+            lbl.setFont(QFont("WenQuanYi Micro Hei", 12, QFont.Bold))
             lbl.setAlignment(Qt.AlignCenter)
             lbl.setStyleSheet("background-color: #2c3e50; color: white; padding: 10px; border-radius: 5px;")
             status_banner.addWidget(lbl)
@@ -68,7 +73,7 @@ class MainWindow(QMainWindow):
         
         rf_group = QVBoxLayout()
         rf_title = QLabel("SDR 射频推断反馈 (瀑布图)")
-        rf_title.setFont(QFont("Microsoft YaHei", 14, QFont.Bold))
+        rf_title.setFont(QFont("WenQuanYi Micro Hei", 14, QFont.Bold))
         rf_title.setStyleSheet("color: #3498db;")
         rf_title.setAlignment(Qt.AlignCenter)
         
@@ -81,7 +86,7 @@ class MainWindow(QMainWindow):
         
         k230_group = QVBoxLayout()
         k230_title = QLabel("K230 边缘节点推流图像")
-        k230_title.setFont(QFont("Microsoft YaHei", 14, QFont.Bold))
+        k230_title.setFont(QFont("WenQuanYi Micro Hei", 14, QFont.Bold))
         k230_title.setStyleSheet("color: #e67e22;")
         k230_title.setAlignment(Qt.AlignCenter)
         
@@ -104,20 +109,13 @@ class MainWindow(QMainWindow):
         self.btn_play.setMinimumHeight(60)
         self.btn_play.setStyleSheet("background-color: #27ae60; color: white; border-radius: 5px; font-weight: bold; font-size: 14px;")
         self.btn_play.clicked.connect(self.toggle_play)
-        
-        self.btn_mock_optical = QPushButton("🔧 [开发工具] 发送系统调试信令 (JSON)")
-        self.btn_mock_optical.setMinimumHeight(40)
-        self.btn_mock_optical.setStyleSheet("background-color: #f39c12; color: white; border-radius: 5px;")
-        self.btn_mock_optical.pressed.connect(lambda: self.hub.mock_k230_trigger(True) if self.hub else None)
-        self.btn_mock_optical.released.connect(lambda: self.hub.mock_k230_trigger(False) if self.hub else None)
-        
+
         self.btn_exit = QPushButton("⏏ 安全终止进程组")
         self.btn_exit.setMinimumHeight(40)
         self.btn_exit.setStyleSheet("background-color: #34495e; color: white; border-radius: 5px;")
         self.btn_exit.clicked.connect(self.close)
-        
+
         btn_layout.addWidget(self.btn_play)
-        btn_layout.addWidget(self.btn_mock_optical)
         btn_layout.addWidget(self.btn_exit)
         
         self.log_textbox = QPlainTextEdit()
@@ -130,25 +128,52 @@ class MainWindow(QMainWindow):
         main_layout.addLayout(bottom_layout)
 
     def setup_evidence_database(self):
-        layout = QHBoxLayout(self.tab2)
-        
+        layout = QVBoxLayout(self.tab2)
+
+        # ── 工具栏 ────────────────────────────────────────────────
+        toolbar = QHBoxLayout()
+        self.btn_clear_db = QPushButton("🗑 一键清除全部记录")
+        self.btn_clear_db.setMinimumHeight(38)
+        self.btn_clear_db.setMaximumWidth(210)
+        self.btn_clear_db.setStyleSheet(
+            "background-color: #c0392b; color: white; border-radius: 5px;"
+            "font-size: 13px; font-weight: bold;"
+        )
+        self.btn_clear_db.clicked.connect(self.on_clear_db_clicked)
+        toolbar.addWidget(self.btn_clear_db)
+        toolbar.addStretch()
+        layout.addLayout(toolbar)
+
+        # ── 表格 + 图片预览 ───────────────────────────────────────
+        content_layout = QHBoxLayout()
+
         self.db_table = QTableWidget()
         self.db_table.setColumnCount(4)
-        self.db_table.setHorizontalHeaderLabels(["ID 号", "系统触发时间", "信号参考量", "置信度"])
-        self.db_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.db_table.setHorizontalHeaderLabels(["ID", "触发时间", "频率 (MHz)", "置信度"])
+
+        # 列宽策略：ID/频率/置信度自适应内容，时间列拉伸填满剩余空间，全部可手动拖拽
+        hdr = self.db_table.horizontalHeader()
+        hdr.setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        hdr.setSectionResizeMode(1, QHeaderView.Stretch)
+        hdr.setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        hdr.setSectionResizeMode(3, QHeaderView.ResizeToContents)
+
         self.db_table.setSelectionBehavior(QTableWidget.SelectRows)
         self.db_table.setSelectionMode(QTableWidget.SingleSelection)
         self.db_table.itemSelectionChanged.connect(self.on_db_row_selected)
-        
-        self.current_db_paths = [] 
-        
-        self.db_img_label = QLabel("待命：正在等待实体行列选择事件...");
-        self.db_img_label.setFixedSize(1400, 600)  
-        self.db_img_label.setStyleSheet("background-color: #1e1e1e; color: #888; font-size: 16px; border: 2px dashed #666;")
+
+        self.current_db_paths = []
+
+        self.db_img_label = QLabel("待命：正在等待实体行列选择事件...")
+        self.db_img_label.setFixedSize(1400, 600)
+        self.db_img_label.setStyleSheet(
+            "background-color: #1e1e1e; color: #888; font-size: 16px; border: 2px dashed #666;"
+        )
         self.db_img_label.setAlignment(Qt.AlignCenter)
-        
-        layout.addWidget(self.db_table, stretch=1)
-        layout.addWidget(self.db_img_label, stretch=3)
+
+        content_layout.addWidget(self.db_table, stretch=1)
+        content_layout.addWidget(self.db_img_label, stretch=3)
+        layout.addLayout(content_layout)
 
     # =============== 视图渲染回调集合 ===============
     def update_rf_frame(self, frame):
@@ -183,6 +208,20 @@ class MainWindow(QMainWindow):
             self.hub.start_sensing()
             self.btn_play.setText("⏸ 安全关停采集管道")
             self.btn_play.setStyleSheet("background-color: #c0392b; color: white;")
+
+    def on_clear_db_clicked(self):
+        """二次确认后清除所有告警记录和图片"""
+        reply = QMessageBox.question(
+            self, "确认清除",
+            "确定要删除全部告警记录和关联图片吗？\n此操作不可撤销。",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        if reply != QMessageBox.Yes:
+            return
+        n = self.db_engine.clear_all()
+        self.load_db_data()
+        self.db_img_label.setText(f"已清除 {n} 条告警记录及关联图片。")
 
     def on_tab_changed(self, index):
         if index == 1:
