@@ -86,7 +86,6 @@ RF-Vision-UAV-Tracker/
 
 ## 6. 部署与装配指南
 
-### 6.1 香橙派 5（RK3588）—— 生产运行环境
 ```bash
 # 克隆仓库并执行自动化环境配置
 git clone https://github.com/ALPssdz/RF-Vision-UAV-Tracker.git
@@ -98,17 +97,4 @@ python tools/convert_yolo_to_rknn.py
 
 # 将 best.rknn 复制至目标路径后启动系统
 python3 system_hub.py
-```
-
-### 6.2 Windows / x86 Linux —— 开发调试模式
-```bash
-pip install pyadi-iio PyQt5 opencv-python numpy torch ultralytics
-python system_hub.py
-```
-> 若未找到 RKNN 模型（`best.rknn`），系统自动降级为 PyTorch CPU 推理并输出警告，S1/S3 射频检测全链路不受影响。
-
-### 6.3 K230 视觉节点模拟器（PC 侧）
-```bash
-# 在 PC 上启动 Mock K230 服务器，并将 config.py 中 K230_RTSP_URL 指向该地址
-python mock_transmitter/mock_k230.py
 ```

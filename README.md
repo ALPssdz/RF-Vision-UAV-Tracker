@@ -86,7 +86,6 @@ RF-Vision-UAV-Tracker/
 
 ## 6. Deployment Instructions
 
-### 6.1 Orange Pi 5 (RK3588) — Production Deployment
 ```bash
 # Clone and run the automated environment setup script
 git clone https://github.com/ALPssdz/RF-Vision-UAV-Tracker.git
@@ -98,17 +97,4 @@ python tools/convert_yolo_to_rknn.py
 
 # Copy best.rknn to the target path, then launch
 python3 system_hub.py
-```
-
-### 6.2 Windows / x86 Linux — Development Mode
-```bash
-pip install pyadi-iio PyQt5 opencv-python numpy torch ultralytics
-python system_hub.py
-```
-> In the absence of an RKNN model (`best.rknn`), the system automatically falls back to PyTorch CPU inference and logs a warning. All RF detection stages (S1/S3) remain fully operational.
-
-### 6.3 K230 Simulator (PC Side)
-```bash
-# Start the mock K230 server on PC, then point config.py K230_RTSP_URL to it
-python mock_transmitter/mock_k230.py
 ```
