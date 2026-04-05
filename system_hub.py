@@ -19,9 +19,17 @@ from database.db_manager import DBManager
 
 class CentralHubEngine(QObject):
     """
-    射频-视觉复合管线中央控制中枢 (事件总线构建)。
-    负责全局编排 SDR 与光电传感器节点，执行跨模态特征校验对齐，
-    向持久化数据库提交事件记录，并向处于表现层的系统界面广播硬件状态帧。
+    系统级中央调度引擎（Central Orchestration Engine）
+
+    基于事件总线（Event Bus）架构，负责协调射频检测子系统与光电视觉子系统
+    的并发数据流，执行跨模态特征融合对齐，将告警事件持久化写入数据库，
+    并通过 Qt 信号机制向 GUI 表现层广播实时状态。
+
+    子系统组成：
+      - RFToolchain   : 三级射频检测流水线（S1-RSSI / S2-YOLO / S3-CycloAudit）
+      - K230Client    : K230 边缘端光电视觉流接收与带外信令解析
+      - DBManager     : SQLite 告警事件持久化引擎
+      - MainWindow    : PyQt5 GUI 表现层
     """
     signal_rf_frame = pyqtSignal(object)
     signal_k230_frame = pyqtSignal(object)
@@ -34,23 +42,22 @@ class CentralHubEngine(QObject):
     def __init__(self):
         super().__init__()
         
-        # 第一阶段：初始化边缘传感器节点及持久化数据底座
+        # 初始化各子系统节点
         self.rf_toolchain = RFToolchain()
-        self.k230_client = K230NetworkClient(rtsp_url="rtsp://192.168.31.250/stream", udp_port=8080)
+        self.k230_client  = K230NetworkClient(rtsp_url="rtsp://192.168.31.250/stream", udp_port=8080)
         self.k230_client.start()
-        
         self.db_engine = DBManager()
-        
-        self.running = False
+
+        self.running        = False
         self._master_thread = None
-        
-        # 初始化并发推断事件证据采集缓冲池
-        self.cache_rf = np.zeros((640, 640, 3), dtype=np.uint8)
+
+        # RF 与视觉通道的最新帧缓存（用于多模态证据融合拼图）
+        self.cache_rf  = np.zeros((640, 640, 3),  dtype=np.uint8)
         self.cache_vis = np.zeros((640, 1137, 3), dtype=np.uint8)
-        
-        # 第二阶段：无代理挂接视图表现层
+
+        # 挂接 GUI 表现层
         self.ui_window = MainWindow(hub=self)
-        self.signal_log.emit("系统冷启动完成：中央事件总线已建立，视图绑定校验通过。")
+        self.signal_log.emit("系统初始化完成：中央事件总线已建立，各子系统节点就绪。")
 
     def start_sensing(self):
         if self.running: return
@@ -74,7 +81,12 @@ class CentralHubEngine(QObject):
         self.k230_client.mock_drone_detected = state
 
     def _trigger_composite_save(self, reason_tag, freq_mhz, score):
-        """ 执行视觉与射频张量的图像空间拼接矩阵生成，并向子文件模块抛出无界面异步落盘指令。 """
+        """
+        生成多模态证据融合图像并写入告警数据库。
+
+        将当前射频频谱帧（cache_rf）与视觉图像帧（cache_vis）水平拼接，
+        叠加告警标注后，调用 DBManager 完成持久化存储。
+        """
         import cv2
         fused_evidence = np.hstack([self.cache_rf, self.cache_vis])
         cv2.putText(fused_evidence, f"ALARM REASON: {reason_tag}", (20, 600), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 255), 2)
@@ -86,6 +98,14 @@ class CentralHubEngine(QObject):
         self.signal_db_updated.emit()
 
     def _hub_loop(self):
+        """
+        主监测循环（在独立守护线程中运行）。
+
+        管线一（RF）：调用 RFToolchain.tick() 执行一次三级检测周期，
+                      处理告警结果并更新 GUI 状态。
+        管线二（光电视觉）：从 K230 客户端获取视频帧与带外信令，
+                           若检测到目标则生成告警记录。
+        """
         while self.running:
             # === [处理管线一：软件无线电跳频解调] ===
             try:
@@ -97,10 +117,16 @@ class CentralHubEngine(QObject):
                     self.signal_log.emit(rf_log)
                     
                 if rf_alert:
-                    self.signal_system_status.emit({"system": "Alert: Unusual RF Comm Link", "color": "#e74c3c"})
+                    self.signal_system_status.emit({"system": "⚠️ Alert: OcuSync RF Detected!", "color": "#e74c3c"})
                     freq = rf_info.get("freq_mhz", 0.0)
                     score = rf_info.get("score", 0.0)
                     self._trigger_composite_save("SDR_OMNI_TRIGGER", freq, score)
+                else:
+                    # 正常周期：恢复绿色运行状态（清除上次的红色告警）
+                    self.signal_system_status.emit({
+                        "system": f"系统状态: 🟢 扫描中 ({rf_info.get('freq_mhz', 0):.0f}MHz)" if rf_info else "系统状态: 🟢 主管道全速扫描中...",
+                        "color": "#27ae60"
+                    })
             except Exception as e:
                 self.signal_log.emit(f"SDR 射频传感器寻址异常: {e}")
                 
@@ -124,7 +150,7 @@ class CentralHubEngine(QObject):
             except Exception as e:
                 self.signal_log.emit(f"边缘侧光学流推流挂起异常: {e}")
                 
-            time.sleep(0.01)
+            time.sleep(0.001)  # 1ms 让出 CPU 给 Qt 事件循环，避免 UI 卡顿
 
     def shutdown(self):
         self.stop_sensing()

@@ -3,141 +3,255 @@ from datetime import datetime
 
 class RF_Stage3_CycloAudit:
     """
-    Cognitive RF Tier 3: Final Feature Audit Evaluation.
-    获取所锁定的待定识别信道段区域内的基本元IQ复矩阵时序矢量层序列，
-    进而提取运行带有显著基带参考循环谱属性分析特化协议处理分类模型。
-    以物理特征原理层面强拒抗大量存在基于时分正交子频域 802.11 设备等引发的一型判定错误伪报现象 (False Positive 抑制)。
+    Stage 3: OcuSync Cyclostationary Spectral Audit Module
+
+    基于循环平稳信号分析理论（Cyclostationary Signal Analysis），
+    对 Stage 2 采集的原始 IQ 数据进行 OFDM 循环前缀（Cyclic Prefix, CP）
+    时移自相关检测，以提取 DJI OcuSync 协议的物理层周期性特征。
+
+    检测原理：
+      OFDM 信号具有循环平稳性。其循环前缀长度为 T_cp，对应延迟 Tau = T_cp × Fs 个样本。
+      时移自相关函数 R(τ) = E[x*(t) · x(t+τ)] 在 τ = T_cp 处呈现显著峰值。
+      归一化后的峰值强度反映了该延迟对应协议的能量占比，可用于协议指纹识别。
+
+    目标延迟参数（Fs = 40 MSps）：
+      - IEEE 802.11 (Wi-Fi): 子载波间隔 Δf = 312.5 kHz → T_u = 3.2 μs → τ_wifi = 128 samples
+      - OcuSync 2.0 (15 kHz): Δf = 15 kHz → T_u = 66.67 μs → τ_15k = 2667 samples
+      - OcuSync 3.0/4.0 (30 kHz): Δf = 30 kHz → T_u = 33.33 μs → τ_30k = 1333 samples
+
+    虚警抑制机制：
+      1. 功率门控：接收功率低于 MIN_POWER_GATE 时跳过（防止低 SNR 下归一化失真）
+      2. 双通道独立判决：τ_30k 和 τ_15k 各自独立与对应阈值比较，避免通道间阈值混用
+      3. 电源纹波鉴别：真实 OcuSync CP 峰在时延域呈 Delta 冲激，旁开 5 samples 即衰减至噪声底；
+         DC-DC SMPS 纹波为低频连续正弦，旁开后仍保持高相关性，据此区分两者
+      4. Wi-Fi 自适应阈值：当 τ_128 处得分较高时，动态上调检测阈值，防止 Wi-Fi 溢出误触发
     """
+
     def __init__(self, sample_rate=40e6):
         self.sample_rate = sample_rate
-        
-        # 【算法纠错升级】：DJI OcuSync 使用的是标准的物理层 OFDM 架构。
-        # 样本延迟常数计算 (Fs = 40MHz)：
-        # Wi-Fi 4/5/6 (802.11g/n/ac): 子载波 312.5kHz => T_u = 3.2微秒 => 延迟样本数 = 128
-        # OcuSync 15kHz 子载波: 符号域长度 = 1/15kHz = 66.67微秒 => 延迟样本数 = 2667
-        # OcuSync 30kHz 子载波: 符号域长度 = 1/30kHz = 33.33微秒 => 延迟样本数 = 1333
-        self.delay_wifi_cp = 128
-        self.delay_ocusync_15k = 2667
-        self.delay_ocusync_30k = 1333
 
+        # 各协议的循环前缀时延样本数（基于 OFDM 子载波间隔计算）
+        # τ = round(Fs / Δf)，其中 Δf 为子载波间隔频率
+        self.delay_wifi_cp     = 128   # IEEE 802.11 a/g/n/ac, Δf = 312.5 kHz
+        self.delay_ocusync_15k = 2667  # OcuSync 2.0 (DJI Mini 3/Air 2S), Δf = 15 kHz
+        self.delay_ocusync_30k = 1333  # OcuSync 3.0/4.0 (DJI Mini 4 Pro/Mavic 3), Δf = 30 kHz
+
+    # =========================================================================
+    # 检测阈值（基于现场环境实测背景数据校准，v3.0）
+    #
+    # 测试环境：室内 5.8GHz ISM 频段，无人机关机状态，采集 3 组背景数据取最大值：
+    #   τ=1333 背景峰值：3.29%（5745 MHz 扇区）
+    #   τ=2667 背景峰值：2.98%（5825 MHz 扇区）
+    #
+    # 阈值设定准则：γ = β_bg_max × α_margin
+    #   其中 α_margin = 2.0（安全余量因子，确保虚警概率 Pfa ≪ 1 同时保留足够检测余量）
+    #   THRESHOLD_30K = 3.29% × 2.0 = 6.6% → 取 7%（工程上调整）
+    #   THRESHOLD_15K = 2.98% × 2.0 = 5.96% → 取 6%
+    # =========================================================================
+    THRESHOLD_30K = 0.07  # τ=1333 通道检测阈值（OcuSync 30 kHz 子载波，Mini 4 Pro）
+    THRESHOLD_15K = 0.06  # τ=2667 通道检测阈值（OcuSync 15 kHz 子载波，Mini 3）
+
+    # 最低可信信号功率门控阈值（归一化 IQ 功率）
+    # 依据：5.8 GHz 相较 2.4 GHz 自由空间路径损耗增量：
+    #   ΔL = 20·log₁₀(5800/2450) = +7.5 dB，即接收功率下降约 5.6 倍
+    # 实测 5785 MHz 扇区背景功率约 6.6×10⁻⁵，将门控阈值设为 1×10⁻⁵
+    # 低于此功率时，SNR 不足以支撑可信的归一化相关估计，直接返回 0
+    MIN_POWER_GATE = 1e-5
+
+    # -------------------------------------------------------------------------
     def _compute_cp_correlation(self, complex_iq, delay_samples):
         """
-        【真理方程】：OFDM 循环协议克星！(基于时移自相关 Delayed Autocorrelation)
-        提取任何伪装在白噪声下的无人机 OcuSync 基带特征。
+        计算归一化时移自相关系数（Normalized Delayed Autocorrelation）。
+
+        定义：
+            R(τ) = |E[x*(t) · x(t+τ)]| / E[|x(t+τ)|²]
+
+        其中 τ = delay_samples，x(t) 为基带复包络 IQ 序列。
+        对 OFDM 信号，R(τ = T_cp·Fs) 处出现显著峰值，
+        峰值幅度反映循环前缀能量占总信号功率的比例。
+
+        Returns
+        -------
+        float : 归一化自相关系数（0~1），0 表示无周期性特征或功率不足
         """
+        # 归一化至 [-1, 1] 量程，去除 ADC 整数量化偏置
         normalized_iq = complex_iq / 32768.0
-        
-        # 扣除物理硬件级直流失调(DC Offset)与本振泄漏(LO Leakage)
+
+        # 去除直流失调（DC Offset）与本振泄漏（LO Leakage）
         normalized_iq = normalized_iq - np.mean(normalized_iq)
-        
-        if len(normalized_iq) <= delay_samples: return 0.0
-            
-        iq_main = normalized_iq[delay_samples:]
+
+        if len(normalized_iq) <= delay_samples:
+            return 0.0
+
+        iq_main    = normalized_iq[delay_samples:]
         iq_delayed = normalized_iq[:-delay_samples]
-        
+
+        power_main = np.mean(np.abs(iq_main) ** 2)
+
+        # 功率门控：接收功率低于阈值时，归一化结果由热噪声涨落主导，不可信
+        if power_main < self.MIN_POWER_GATE:
+            return 0.0
+
+        # 计算复互相关并归一化
         correlation = np.abs(np.mean(iq_main * np.conj(iq_delayed)))
-        power_main = np.mean(np.abs(iq_main) ** 2) + 1e-12
-        return correlation / power_main
-        
+        return correlation / (power_main + 1e-12)
+
+    # -------------------------------------------------------------------------
     def run_spectral_audit(self, iq_data_buffer):
-        # 【同源时空切片审讯】
-        # 接收到由 S2 画图时所采集到的一段 0.26 秒（约 1048 万个基带节点）的完整雷达底层物理死区录像。
-        
-        chunk_size = 200000 
-        step_size  = chunk_size // 2  # 50% 重叠率的高精度步幅
+        """
+        对输入 IQ 缓冲区执行完整的循环谱审计流程。
+
+        算法流程：
+          1. 滑动窗口分帧（窗口长度 200 000 采样点，50% 重叠）
+          2. 对每帧并行计算 τ_30k 和 τ_15k 的归一化自相关系数
+          3. 记录各通道在全缓冲区内的峰值（peak_30k, peak_15k）
+          4. 分别与对应阈值（动态调整后）进行独立比较，任一超标进入验证流程
+          5. 旁开点验证：计算 τ-5 处的相关值，判断时延峰的尖锐度
+             - 峰值尖锐（adj/peak < 0.6）：与 OFDM CP 特征一致 → 判定为 OcuSync
+             - 峰值宽平（adj/peak ≥ 0.6）：与连续波纹波特征一致 → 判定为 SMPS 干扰
+
+        Parameters
+        ----------
+        iq_data_buffer : array-like
+            来自 AD9364 ADC 的原始整数 IQ 数据（int16 格式，I/Q 交织或复数数组）
+
+        Returns
+        -------
+        (bool, float) : (检测结果, 最大相关系数)
+            True 表示检测到 OcuSync 协议特征，False 表示未检测到或被虚警抑制
+        """
+        chunk_size   = 200000
+        step_size    = chunk_size // 2  # 50% 重叠，保证帧边界处的突发包不被漏检
         total_samples = len(iq_data_buffer)
-        
-        max_30k = 0.0
+
+        # 第一遍扫描：追踪全局最大值（用于确定最佳候选帧及 Wi-Fi 伴随指标）
+        max_30k      = 0.0
         assoc_wifi_cp = 0.0
-        
-        best_chunk = None
+        best_chunk   = None
         target_delay = self.delay_ocusync_30k
-        
-        # 将长达 65 毫秒的带卷切分成极其致密的小时间格。
-        # 由于您现在追求极致精度，我刚才为您加入了【50% 相互重叠的滑动窗口】！
-        # 这个军工级技巧能保证：即使大疆那种转瞬即逝的突发数据包刚好落在了两个检测区间的边界上，它也一定会被下一个重叠的窗口完整吞噬捕获。这能彻底消灭“边缘稀释”造成的降分漏报，将极限侦测率推入 100%！
+
         for i in range(0, total_samples - chunk_size, step_size):
             chunk = iq_data_buffer[i : i + chunk_size]
-            
             score_cp_30k = self._compute_cp_correlation(chunk, self.delay_ocusync_30k)
             score_cp_15k = self._compute_cp_correlation(chunk, self.delay_ocusync_15k)
-            
             local_max = max(score_cp_30k, score_cp_15k)
-            
-            # 只提取 OcuSync 循环谱极性最高的那一段切片，并连带抓取它身上的 Wi-Fi 混合附着指标
+
+            # 记录含最高 OcuSync 特征的候选帧，同步提取其 Wi-Fi 伴随相关系数
             if local_max > max_30k:
-                max_30k = local_max
+                max_30k       = local_max
                 assoc_wifi_cp = self._compute_cp_correlation(chunk, self.delay_wifi_cp)
-                best_chunk = chunk
-                target_delay = self.delay_ocusync_30k if score_cp_30k > score_cp_15k else self.delay_ocusync_15k
-        
-        print(f"      >> [S3 时分多址切片矩阵审讯最值] Wi-Fi({assoc_wifi_cp*100:.1f}%) | 纯净 O4(30kHz/15kHz) = {max_30k*100:.2f}%")
-        
-        # =========================================================================
-        # 【数据驱动真实阈值定律】
-        # 数据集告知我们，在极端的衰落里，无人机的峰值是 0.058
-        # 所以我们的判定基线设立在精确的 0.045
-        # =========================================================================
-        
-        # Wi-Fi 防御系统：如果 Wi-Fi 在 128CP 并没有什么反应（<0.040），那么我们放心用 0.045 抓无人机
-        # 如果满屏幕都是 Wi-Fi（比如 >0.05），防爆基线才会跟着抬高限制假阳。
-        dynamic_th = max(0.045, assoc_wifi_cp * 0.40)
-        
-        if max_30k > dynamic_th:
-            # 【防爆盾 2.0：剔除 30kHz 开关电源（DC-DC SMPS）纹波污染】
-            # 如果此时根本没有开靶机，却测出 10% 的最高分数，那这是一场绝美的微电子学硬件事故：
-            # RK3588 或 PlutoSDR 的主板 DC-DC 降压开关频率非常可能在 30kHz 或其倍频附近！
-            # 这种电源开关的毛刺噪声通过 USB / 电源地线漏入了 ADC。而 30kHz 恰好在 40M下映射为 1333 样本点周期！
+                best_chunk    = chunk
+                target_delay  = self.delay_ocusync_30k if score_cp_30k > score_cp_15k else self.delay_ocusync_15k
+
+        print(f"  [S3] Background correlation — R(τ=128)={assoc_wifi_cp*100:.1f}% | OcuSync max peak: {max_30k*100:.2f}%")
+
+        # =====================================================================
+        # 双通道独立判决（Independent Dual-Channel Decision）
+        #
+        # 设计依据：τ_30k 与 τ_15k 分别对应不同型号无人机的协议规格，
+        # 信号强度存在差异，不应共用同一阈值进行首级门限判断。
+        # 采用各通道独立与其对应阈值比较，OR 逻辑触发后验证，可提升检测概率。
+        # =====================================================================
+        th_30k = self.THRESHOLD_30K
+        th_15k = self.THRESHOLD_15K
+
+        # Wi-Fi 自适应阈值调整：
+        # 当 τ_128 处相关系数较高时，表明环境中存在强 Wi-Fi 干扰，
+        # 动态上调阈值以抑制 Wi-Fi 频谱溢出（spectral spillover）导致的虚警
+        dynamic_th_30k = max(th_30k, assoc_wifi_cp * 0.40)
+        dynamic_th_15k = max(th_15k, assoc_wifi_cp * 0.40)
+
+        # 第二遍扫描：各通道独立追踪峰值（避免通道间最大值互相掩盖）
+        peak_30k = 0.0
+        peak_15k = 0.0
+        for i in range(0, total_samples - chunk_size, step_size):
+            chunk = iq_data_buffer[i : i + chunk_size]
+            s30 = self._compute_cp_correlation(chunk, self.delay_ocusync_30k)
+            s15 = self._compute_cp_correlation(chunk, self.delay_ocusync_15k)
+            if s30 > peak_30k:
+                peak_30k     = s30
+                target_delay = self.delay_ocusync_30k
+            if s15 > peak_15k:
+                peak_15k     = s15
+                best_chunk   = chunk
+                target_delay = self.delay_ocusync_15k
+
+        print(f"  [S3] Dual-channel peaks — τ=1333: {peak_30k*100:.2f}% (th={dynamic_th_30k*100:.1f}%) | "
+              f"τ=2667: {peak_15k*100:.2f}% (th={dynamic_th_15k*100:.1f}%)")
+
+        # OR 逻辑：任一通道超过其对应阈值，即进入验证阶段
+        triggered       = False
+        triggered_score = 0.0
+        if peak_30k > dynamic_th_30k:
+            triggered       = True
+            triggered_score = max(triggered_score, peak_30k)
+        if peak_15k > dynamic_th_15k:
+            triggered       = True
+            triggered_score = max(triggered_score, peak_15k)
+
+        if triggered:
+            # =================================================================
+            # 时延旁瓣验证（Adjacent-Tap Sharpness Test）
             #
-            # 物理破局点：真正大疆的 OFDM 循环前缀在时延域上必定是极度尖锐的【Delta冲激】。
-            # 而开关电源是低频的连续波纹，其自相关是一个宽大肥胖的正弦包络。
+            # 原理：真实 OFDM 循环前缀的时移自相关在 τ = T_cp 处呈现 Delta 函数特征，
+            # 偏移 ±5 个采样点后，相关值应迅速衰减至背景噪声水平（< 1%）。
+            # DC-DC SMPS 的开关纹波为低频连续正弦波，其自相关函数为正弦包络，
+            # 旁开 5 点后相关值衰减有限（> 60% 峰值），可据此区分两种干扰源。
+            # =================================================================
             if best_chunk is not None:
                 adj_corr = self._compute_cp_correlation(best_chunk, target_delay - 5)
-                # 偏移 5 个点，大疆真机的数据会暴跌回 1% 的白噪音。
-                # 但如果它还是很大（超过顶峰的 60%），说明它是连绵不绝的电源噪声长波！
-                if adj_corr > (max_30k * 0.60):
-                    print(f"      >> [S3 诊断报告] 物理硬件级过滤！识别到宽体连续波伪影(旁开能量:{adj_corr*100:.1f}%)，判定为电源线纹波/杂讯谐振，强制封杀假阳。")
-                    return False, max_30k
-                
-                # ==========================================================
-                # [DEBUG ONLY]: S3 循环谱雷达快照留影！
-                # 既然命中了无人机，我们把这一段底座给展开，画出它在这个宇宙里的真实循环谱刻痕！
-                # ==========================================================
+                if adj_corr > (triggered_score * 0.60):
+                    print(f"  [S3] Adjacent-tap test FAILED: R(τ-5)={adj_corr*100:.1f}% > "
+                          f"0.60 × peak({triggered_score*100:.1f}%) — SMPS ripple interference, alert suppressed.")
+                    return False, triggered_score
+
+                # 检测确认：生成循环谱诊断图像（用于事后分析）
                 try:
                     import matplotlib
-                    matplotlib.use('Agg') # 强制使用显存后端防止在 PyQt 线程里爆炸闪退
+                    matplotlib.use('Agg')
+                    matplotlib.rcParams['font.family'] = ['Microsoft YaHei', 'SimHei', 'DejaVu Sans']
+                    matplotlib.rcParams['axes.unicode_minus'] = False
                     import matplotlib.pyplot as plt
                     import os
-                    
-                    print("      >> [S3 诊断报告] 正在拓印本次斩获大疆数据的全景循环图谱...")
+
+                    print("  [S3] Generating cyclostationary spectrum snapshot...")
                     delays_scan = np.arange(100, 3000, 10)
-                    corrs_scan = [self._compute_cp_correlation(best_chunk, d) for d in delays_scan]
-                    
+                    corrs_scan  = [self._compute_cp_correlation(best_chunk, d) for d in delays_scan]
+
                     plt.figure(figsize=(10, 4))
-                    plt.plot(delays_scan, corrs_scan, color='#FF5722', label='Real-time Correlation')
-                    plt.axvline(1333, color='blue', linestyle='--', label='1333 (Mini 4/Mavic 3)')
-                    plt.axvline(2667, color='green', linestyle='--', label='2667 (Mini 3/Air 2)')
-                    
-                    plt.title(f"S3 LIVE Intercept (Peak Hit: {max_30k*100:.2f}%)")
-                    plt.xlabel("Delay Tau (Samples)")
-                    plt.ylabel("CP Score")
+                    plt.plot(delays_scan, corrs_scan, color='#FF5722', linewidth=1.2,
+                             label='Normalized Autocorrelation')
+                    plt.axvline(1333, color='#1565C0', linestyle='--',
+                                label=f'τ=1333 (OcuSync 30kHz): {peak_30k*100:.1f}%')
+                    plt.axvline(2667, color='#2E7D32', linestyle='--',
+                                label=f'τ=2667 (OcuSync 15kHz): {peak_15k*100:.1f}%')
+                    plt.axhline(dynamic_th_30k, color='#1565C0', linestyle=':', alpha=0.6,
+                                label=f'Threshold 30k = {dynamic_th_30k*100:.1f}%')
+                    plt.axhline(dynamic_th_15k, color='#2E7D32', linestyle=':', alpha=0.6,
+                                label=f'Threshold 15k = {dynamic_th_15k*100:.1f}%')
+                    plt.title(f"S3 Cyclostationary Audit — OcuSync Detected "
+                              f"(τ₃₀: {peak_30k*100:.2f}% | τ₁₅: {peak_15k*100:.2f}%)")
+                    plt.xlabel("Delay τ (samples)  [Fs = 40 MSps]")
+                    plt.ylabel("Normalized Autocorrelation Coefficient")
                     plt.grid(alpha=0.3)
-                    plt.legend()
-                    
-                    db_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "database", "alert_images")
+                    plt.legend(fontsize=8)
+                    plt.tight_layout()
+
+                    db_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                          "..", "database", "alert_images")
                     os.makedirs(db_dir, exist_ok=True)
-                    out_img = os.path.join(db_dir, "S3_Debug_Spectrum.png")
-                    plt.savefig(out_img, dpi=120)
+                    plt.savefig(os.path.join(db_dir, "S3_Cyclo_Snapshot.png"), dpi=120)
                     plt.close()
-                    print(f"      >> [S3 诊断报告] 全景图谱拓印完成，已被挂载在右侧柜子 / 数据库！")
+                    print("  [S3] Snapshot saved → database/alert_images/S3_Cyclo_Snapshot.png")
                 except Exception as e:
-                    print(f"      >> [S3 诊断报告] 绘图引擎临时故障: {e}")
-                # ==========================================================
-                
-            return True, max_30k
-            
+                    print(f"  [S3] Snapshot generation error: {e}")
+
+            return True, triggered_score
+
+        # Wi-Fi 高强度拦截日志
         elif assoc_wifi_cp > 0.040:
-            print(f"      >> [S3 诊断报告] 协议防火墙拦截！该切片属于高烈度 IEEE 802.11 Wi-Fi 背景通讯。")
+            print(f"  [S3] Wi-Fi spillover suppression: R(τ=128)={assoc_wifi_cp*100:.1f}% > 4.0% "
+                  f"— classified as IEEE 802.11 spectral spillover, alert suppressed.")
             return False, assoc_wifi_cp
-            
+
         return False, max_30k
