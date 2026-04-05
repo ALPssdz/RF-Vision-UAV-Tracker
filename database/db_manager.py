@@ -4,34 +4,50 @@ import time
 import cv2
 from datetime import datetime
 
+
 class DBManager:
     """
-    底层数据封存封装层接口（Data Persistence Adapter）。
-    对内处理跨物理文件系统图像矩阵存储和多模态异构融合数据的 SQLite 表单事务。
-    该模块严格遵循内聚原则，使得日志、缓存皆固定落位于模块局域存储目录内。
+    告警事件持久化管理模块（Data Persistence Adapter）。
+
+    负责将多模态融合证据图像写入文件系统，并在 SQLite3 关系型数据库中
+    维护对应的元数据索引记录。所有文件 I/O 操作均限定于本模块所在目录
+    （``database/``）内，确保路径可移植性。
+
+    存储容量约束：数据库记录上限为 1000 条；超出时触发 LRU 淘汰策略，
+    自动删除最早的 100 条记录及其关联图像文件。
     """
-    def __init__(self, db_filename="rf_alert_history.db", img_dirname="alert_images"):
-        # 限定文件I/O活动半径在 database 的单一实体语义文件夹内
+
+    def __init__(self, db_filename: str = "rf_alert_history.db",
+                 img_dirname: str = "alert_images"):
+        """
+        Parameters
+        ----------
+        db_filename : str
+            SQLite3 数据库文件名，默认为 ``rf_alert_history.db``。
+        img_dirname : str
+            告警图像存储目录名，默认为 ``alert_images``。
+        """
         self.module_dir = os.path.dirname(os.path.abspath(__file__))
-        
-        self.db_path = os.path.join(self.module_dir, db_filename)
-        self.img_dir = os.path.join(self.module_dir, img_dirname)
-        
-        if not os.path.exists(self.img_dir):
-            os.makedirs(self.img_dir)
-            
+        self.db_path    = os.path.join(self.module_dir, db_filename)
+        self.img_dir    = os.path.join(self.module_dir, img_dirname)
+
+        os.makedirs(self.img_dir, exist_ok=True)
         self._init_tables()
 
+    # ------------------------------------------------------------------
+    # 内部方法
+    # ------------------------------------------------------------------
+
     def _init_tables(self):
-        """ 执行初始化的事件总账数据库物理建表操作。 """
+        """创建 alerts 数据表（若已存在则跳过）。"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS alerts (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp TEXT,
-                freq_mhz REAL,
-                score REAL,
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp  TEXT,
+                freq_mhz   REAL,
+                score      REAL,
                 image_path TEXT
             )
         ''')
@@ -40,23 +56,26 @@ class DBManager:
 
     def _manage_storage(self):
         """
-        【自动生命周期冷热淘汰管理机制 (LRU Size Control)】
-        确保无人值守雷达长时间运行时不会耗尽主板硬盘。一旦事件总账逼近峰值，剥离历史重负。
-        物理定界：最大保留记录 1000 条。超标自动物理删除最老的 100 张抓拍图片与关联事务。
+        LRU 存储容量管理：确保数据库记录不超过预设上限。
+
+        当记录总数超过 ``max_records``（1000 条）时，按插入顺序删除最旧的
+        ``prune_count``（100 条）记录及其关联的图像文件。
         """
         max_records = 1000
         prune_count = 100
-        
+
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-        
         cursor.execute("SELECT COUNT(*) FROM alerts")
         count = cursor.fetchone()[0]
-        
+
         if count > max_records:
-            cursor.execute("SELECT id, image_path FROM alerts ORDER BY id ASC LIMIT ?", (prune_count,))
+            cursor.execute(
+                "SELECT id, image_path FROM alerts ORDER BY id ASC LIMIT ?",
+                (prune_count,)
+            )
             old_rows = cursor.fetchall()
-            
+
             for row_id, img_path in old_rows:
                 if os.path.exists(img_path):
                     try:
@@ -64,72 +83,98 @@ class DBManager:
                     except Exception:
                         pass
                 cursor.execute("DELETE FROM alerts WHERE id=?", (row_id,))
-                
+
             conn.commit()
-            print(f"[Database] 自持存储边界已触发。系统已自动剥离并摧毁最老的 {prune_count} 个远古侦测目标。")
-            
+            print(f"[DBManager] LRU 淘汰触发：已删除最早的 {prune_count} 条记录及关联图像。")
+
         conn.close()
 
-    def log_alert(self, freq_mhz, score, bgr_image):
+    # ------------------------------------------------------------------
+    # 公开接口
+    # ------------------------------------------------------------------
+
+    def log_alert(self, freq_mhz: float, score: float,
+                  bgr_image: "np.ndarray") -> int:
         """
-        向磁盘映射生成的联合模态监控事件序列图，并在关系型数据库内顺次进行实体注册。
-        返回本地日志事务流中自增衍生的唯一索引 ID 号。
+        将一次告警事件的融合证据图像持久化至磁盘，并在数据库中注册元数据。
+
+        Parameters
+        ----------
+        freq_mhz : float
+            触发告警的频率（MHz）。
+        score : float
+            综合置信度评分（归一化至 [0, 1]）。
+        bgr_image : numpy.ndarray
+            BGR 格式的融合证据图像矩阵，由 ``system_hub`` 拼接生成。
+
+        Returns
+        -------
+        int
+            本次写入记录在数据库中自增的唯一 ID。
         """
-        # [调用物理容量限流器]
         self._manage_storage()
-        
-        now = datetime.now()
-        timestamp_str = now.strftime("%Y-%m-%d %H:%M:%S")
+
+        now            = datetime.now()
+        timestamp_str  = now.strftime("%Y-%m-%d %H:%M:%S")
         timestamp_file = now.strftime("%Y%m%d_%H%M%S")
-        ms = int((time.time() % 1) * 1000)
-        
-        filename = f"UAV_Intercept_{freq_mhz}MHz_{timestamp_file}_{ms}.jpg"
+        ms             = int((time.time() % 1) * 1000)
+
+        filename          = f"UAV_Intercept_{freq_mhz}MHz_{timestamp_file}_{ms}.jpg"
         absolute_img_path = os.path.join(self.img_dir, filename)
-        
-        # 使用下层调用栈实施硬编码字节级序列化矩阵
+
+        # 将融合证据图像以 JPEG 格式编码写入文件系统
         cv2.imwrite(absolute_img_path, bgr_image)
-        
+
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-        cursor.execute('''
-            INSERT INTO alerts (timestamp, freq_mhz, score, image_path)
-            VALUES (?, ?, ?, ?)
-        ''', (timestamp_str, freq_mhz, score, absolute_img_path))
-        
+        cursor.execute(
+            "INSERT INTO alerts (timestamp, freq_mhz, score, image_path) VALUES (?, ?, ?, ?)",
+            (timestamp_str, freq_mhz, score, absolute_img_path)
+        )
         new_id = cursor.lastrowid
         conn.commit()
         conn.close()
-        
+
         return new_id
 
-    def get_all_alerts(self):
+    def get_all_alerts(self) -> list:
         """
-        提供给前端 View 表现层执行历史日志抽取的访问方法。
-        按反时间轴提取记录，返回游标数据的只读链表形式：[(id, timestamp, freq, score, image_path), ...]
+        按时间逆序检索所有告警记录，供 GUI 表现层渲染历史日志列表。
+
+        Returns
+        -------
+        list of tuple
+            格式为 [(id, timestamp, freq_mhz, score, image_path), ...]，
+            按 id 降序排列（最新记录在前）。
         """
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-        cursor.execute("SELECT id, timestamp, freq_mhz, score, image_path FROM alerts ORDER BY id DESC")
+        cursor.execute(
+            "SELECT id, timestamp, freq_mhz, score, image_path FROM alerts ORDER BY id DESC"
+        )
         rows = cursor.fetchall()
         conn.close()
         return rows
 
     def clear_all(self) -> int:
         """
-        清除全部告警记录：
-          1. 删除 alert_images/ 目录下所有图片文件
-          2. 清空 alerts 数据表（保留表结构）
+        清除数据库中全部告警记录及其关联图像文件。
+
+        操作步骤：
+          1. 查询所有记录的图像路径并逐一删除对应文件；
+          2. 清空 alerts 数据表（保留表结构）；
+          3. 重置自增 ID 计数器，使后续记录从 1 开始编号。
 
         Returns
         -------
-        int : 被删除的记录条数
+        int
+            本次操作删除的记录总条数。
         """
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
 
-        # 获取所有图片路径后统一删除
         cursor.execute("SELECT image_path FROM alerts")
-        paths = [row[0] for row in cursor.fetchall()]
+        paths         = [row[0] for row in cursor.fetchall()]
         deleted_count = len(paths)
 
         for img_path in paths:
@@ -140,7 +185,6 @@ class DBManager:
                 pass
 
         cursor.execute("DELETE FROM alerts")
-        # 重置自增 ID 计数器，使新记录从 1 开始
         cursor.execute("DELETE FROM sqlite_sequence WHERE name='alerts'")
         conn.commit()
         conn.close()

@@ -3,95 +3,130 @@ import numpy as np
 import threading
 import socket
 import json
+import copy
 import time
+
 
 class K230NetworkClient:
     """
-    K230 边缘节点网络通信客户端配置实体。
-    此适配器主要负责高保真获取非对称的异步带外 UDP (Out-Of-Band) 信令极低延迟遥测包，
-    同时在解耦的旁支线程获取高吞吐量的连贯化预解码 RTSP 光流媒体反馈。
+    K230 边缘视觉节点网络通信客户端。
+
+    本模块通过两条并行网络信道与 K230 边缘节点进行通信：
+      - **RTSP/TCP 信道**：接收 H.264 编码视频流，用于人工复核与 GUI 展示；
+      - **UDP OOB 信道**：接收轻量级目标锁定遥测包（边界框坐标 + 置信度），
+        实现与视频流解耦的低延迟告警触发。
+
+    视频轮询与 UDP 监听分别运行于独立的守护线程，通过内部共享缓冲区与主线程
+    进行异步数据交换。
     """
-    def __init__(self, rtsp_url="rtsp://192.168.31.250/stream", udp_port=8080):
+
+    def __init__(self, rtsp_url: str = "rtsp://192.168.31.250/stream",
+                 udp_port: int = 8080):
+        """
+        Parameters
+        ----------
+        rtsp_url : str
+            K230 视频推流地址（RTSP 或 HTTP-MJPEG 均可）。
+        udp_port : int
+            本机 UDP 监听端口，用于接收 K230 上报的遥测数据包。
+        """
         self.rtsp_url = rtsp_url
         self.udp_port = udp_port
-        
-        # 建立线程读写的内部本地数据缓冲池
-        self.latest_frame = np.zeros((640, 1137, 3), dtype=np.uint8)
+
+        # 线程间共享的最新数据缓冲区（由守护线程写入，主线程只读复制）
+        self.latest_frame     = np.zeros((640, 1137, 3), dtype=np.uint8)
         self.latest_telemetry = {"alert": False, "confidence": 0.0, "bbox": []}
-        
+
         self.running = False
-        self.mock_drone_detected = False # 经 UI 呈现层内部调试面板下发的人工覆写开关
-        
+
         self._video_thread = None
-        self._udp_thread = None
-        self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self._udp_thread   = None
+        self._sock         = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self._sock.settimeout(0.5)
 
     def start(self):
+        """启动视频采集线程与 UDP 遥测监听线程。"""
         self.running = True
         self._sock.bind(("0.0.0.0", self.udp_port))
-        
+
         self._video_thread = threading.Thread(target=self._video_loop, daemon=True)
-        self._udp_thread = threading.Thread(target=self._udp_loop, daemon=True)
-        
+        self._udp_thread   = threading.Thread(target=self._udp_loop,   daemon=True)
+
         self._video_thread.start()
         self._udp_thread.start()
 
     def stop(self):
+        """发出停止信号，等待守护线程退出并释放 socket 资源。"""
         self.running = False
         self._sock.close()
-        if self._video_thread: self._video_thread.join(timeout=1.0)
-        if self._udp_thread: self._udp_thread.join(timeout=1.0)
+        if self._video_thread:
+            self._video_thread.join(timeout=1.0)
+        if self._udp_thread:
+            self._udp_thread.join(timeout=1.0)
 
-    def get_synced_data(self):
-        """ 
-        向上限中央总线透传在物理时空刻表产生交叉时间对齐的张量特征流副本。
+    def get_synced_data(self) -> tuple:
         """
-        import copy
+        获取最新的视频帧与遥测数据的深拷贝副本，供主线程安全读取。
+
+        Returns
+        -------
+        tuple of (numpy.ndarray, dict)
+            - frame      : 形状为 (640, width, 3) 的 BGR 视频帧；
+            - telemetry  : 遥测字典，键包括 ``alert`` (bool)、
+                           ``confidence`` (float)、``bbox`` (list)。
+        """
         telemetry = copy.deepcopy(self.latest_telemetry)
-        
-        if self.mock_drone_detected:
-            telemetry["alert"] = True
-            telemetry["confidence"] = 99.9
-            telemetry["bbox"] = [800, 400, 1100, 600]
-            
-        frame = self.latest_frame.copy()
+        frame     = self.latest_frame.copy()
         return frame, telemetry
 
+    # ------------------------------------------------------------------
+    # 守护线程内部方法
+    # ------------------------------------------------------------------
+
     def _video_loop(self):
-        """ 解耦异步 RTSP H.264 视频推流轮询处理线程 """
-        cap = cv2.VideoCapture(self.stream_url) if hasattr(self, 'stream_url') else cv2.VideoCapture(self.rtsp_url)
+        """
+        RTSP 视频流采集循环（守护线程）。
+
+        持续从 RTSP/HTTP 地址读取视频帧，按比例缩放至高度 640 像素后
+        写入共享缓冲区。连接中断时自动重新建立连接。
+        """
+        cap = cv2.VideoCapture(self.rtsp_url)
         while self.running:
             ret, frame = cap.read()
             if not ret:
+                # 连接中断：写入占位图像并尝试重连
                 blank = np.zeros((640, 1137, 3), dtype=np.uint8)
-                cv2.putText(blank, "[K230] RTSP UNAVAILABLE", (150, 320), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (100, 100, 200), 3)
+                cv2.putText(blank, "[K230] RTSP UNAVAILABLE",
+                            (150, 320), cv2.FONT_HERSHEY_SIMPLEX,
+                            1.5, (100, 100, 200), 3)
                 self.latest_frame = blank
                 time.sleep(0.5)
-                # 自愈式异常重联执行器机制
                 cap = cv2.VideoCapture(self.rtsp_url)
             else:
-                h, w = frame.shape[:2]
-                new_w = int((640 / h) * w)
+                h, w   = frame.shape[:2]
+                new_w  = int((640 / h) * w)
                 self.latest_frame = cv2.resize(frame, (new_w, 640))
-            time.sleep(0.02) # 强制 50FPS 最高帧率阀门管制
-            
+
+            time.sleep(0.02)  # 限制轮询频率上限为 50 Hz
+
         cap.release()
 
     def _udp_loop(self):
-        """ 强化硬级别实时优先级的端到端带外 UDP 遥测信函提取环路 """
+        """
+        UDP OOB 遥测数据包接收循环（守护线程）。
+
+        持续监听指定 UDP 端口，解析 JSON 格式的遥测数据包并更新共享缓冲区。
+        超时或格式异常时静默跳过，不中断循环。
+        """
         while self.running:
             try:
-                data, addr = self._sock.recvfrom(1024)
+                data, _ = self._sock.recvfrom(1024)
                 if data:
-                    json_str = data.decode('utf-8')
-                    packet = json.loads(json_str)
-                    
-                    self.latest_telemetry["alert"] = packet.get("alert", False)
-                    self.latest_telemetry["bbox"] = packet.get("bbox", [])
-                    self.latest_telemetry["confidence"] = packet.get("conf", 0.0)
-                    
+                    packet = json.loads(data.decode("utf-8"))
+                    self.latest_telemetry["alert"]      = packet.get("alert", False)
+                    self.latest_telemetry["bbox"]       = packet.get("bbox",  [])
+                    self.latest_telemetry["confidence"] = packet.get("conf",  0.0)
             except socket.timeout:
                 pass
-            except Exception as e:
+            except Exception:
                 pass

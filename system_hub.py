@@ -58,13 +58,13 @@ class CentralHubEngine(QObject):
         self._master_thread = None
         self._tick_lock     = threading.Lock()  # 防止 tick() 在 stop/start 切换时重入
 
-        # RF 与视觉通道的最新帧缓存（用于多模态证据融合拼图）
+        # RF 与视觉通道的最新帧缓存（供多模态证据融合使用）
         self.cache_rf  = np.zeros((640, 640, 3),  dtype=np.uint8)
         self.cache_vis = np.zeros((640, 1137, 3), dtype=np.uint8)
 
-        # 挂接 GUI 表现层
+        # 实例化 GUI 表现层并注入中央事件总线引用
         self.ui_window = MainWindow(hub=self)
-        self.signal_log.emit("系统初始化完成：中央事件总线已建立，各子系统节点就绪。")
+        self.signal_log.emit("系统初始化完成：各子系统节点已就绪，中央事件路由建立。")
 
     def start_sensing(self):
         if self.running: return
@@ -75,7 +75,7 @@ class CentralHubEngine(QObject):
             "sdr": "SDR 节点: 🔄 IQ 数据采集中",
             "vision": "视频节点: 🔄 画面及信令监听中"
         })
-        self.signal_log.emit("底层硬件物理端口阻塞解除，并行信号采集进程已置位。")
+        self.signal_log.emit("采集管道启动：SDR 前端及视觉网络客户端已进入工作状态。")
         self._master_thread = threading.Thread(target=self._hub_loop, daemon=True)
         self._master_thread.start()
         
