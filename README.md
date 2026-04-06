@@ -6,9 +6,11 @@
 - [1. Introduction](#1-introduction)
 - [2. System Architecture](#2-system-architecture)
 - [3. Three-Stage RF Detection Pipeline](#3-three-stage-rf-detection-pipeline)
-- [4. Asymmetric Fusion Methodology](#4-asymmetric-fusion-methodology)
-- [5. Software Stack & Module Organization](#5-software-stack--module-organization)
-- [6. Deployment Instructions](#6-deployment-instructions)
+- [4. S3 Autonomous Field Calibration](#4-s3-autonomous-field-calibration)
+- [5. Asymmetric Fusion Methodology](#5-asymmetric-fusion-methodology)
+- [6. Software Stack & Module Organization](#6-software-stack--module-organization)
+- [7. Deployment Instructions](#7-deployment-instructions)
+- [8. Validated Detection Performance](#8-validated-detection-performance)
 
 ## 1. Introduction
 RF-Vision-UAV-Tracker is a distributed, multi-modal Unmanned Aerial Vehicle (UAV) detection and early-warning system. By integrating Software-Defined Radio (SDR) with edge-computing optical vision, this system addresses the inherent limitations of single-sensor detection methodologies (e.g., localized blind spots and vulnerability to radio silence). It employs an asymmetric Out-Of-Band (OOB) sensor fusion architecture to achieve robust target acquisition and evidentiary logging in complex electromagnetic environments.
@@ -35,7 +37,7 @@ IQ Samples (AD9364, 40 MSps, 2.62M samples/burst)
         ▼
   Stage 1 — RSSI Pre-scan (S1)
     Fast power measurement across all 5.8 GHz sectors.
-    Selects the dominant frequency band for deep inspection.
+    EMA-weighted priority ranking selects the dominant frequency band.
         │
         ▼
   Stage 2 — Spectrogram + YOLOv8 (S2)
@@ -49,22 +51,59 @@ IQ Samples (AD9364, 40 MSps, 2.62M samples/burst)
     protocol-level separation between OcuSync and Wi-Fi — even when
     Wi-Fi is 20 dB stronger than the UAV signal.
 
-    Target cycle frequencies:
-      OcuSync 2.0 (Δf=15 kHz, τ=2667): α_sym = Fs/(N_fft+N_cp) ≈ 12 kHz
-      OcuSync 3.0/4.0 (Δf=30 kHz, τ=1333): α_sym ≈ 24 kHz
-      Wi-Fi 802.11 (Δf=312.5 kHz, τ=128): α_sym = 250 kHz  ← orthogonal
+    Target cycle frequencies (Fs = 40 MSps):
+      OcuSync 2.0 (Δf=15 kHz, τ=2667):     α_sym ≈ 12–14 kHz
+      OcuSync 3.0/4.0 (Δf=30 kHz, τ=1333): α_sym ≈ 22–28 kHz
+      Wi-Fi 802.11 (Δf=312.5 kHz, τ=128):  α_sym = 250 kHz  ← orthogonal
 
-    Wi-Fi leakage into OcuSync channel (N=200000, Fs=40 MHz):
+    Wi-Fi leakage into OcuSync channel (N=200 000, Fs=40 MHz):
       NCC_WiFi ≈ P_WiFi · sinc(1130) ≈ 0.028% of Wi-Fi power
 
     Four-stage decision funnel:
-      L1 — Frame-level CAF peak extraction
-      L2 — Combined statistic (peak×0.45 + avg×0.55) > adaptive threshold
+      L1 — Frame-level CAF peak extraction (75% overlap, 200k-sample frames)
+      L2 — Combined statistic (peak×0.50 + avg×0.50) > per-sector adaptive threshold
       L3 — τ-domain PSR (Peak-to-Sidelobe Ratio) ≥ 2.5×
       L4 — α-domain CFS (Cyclic Frequency Sharpness) ≥ 1.8×
 ```
 
-## 4. Asymmetric Fusion Methodology
+## 4. S3 Autonomous Field Calibration
+
+Every time `system_hub.py` starts, it automatically executes a **zero-interaction ambient calibration** before entering detection mode. No user password or confirmation is required.
+
+### Calibration Algorithm
+
+For each of the three 5.8 GHz sectors, `calibrate_s3.py` captures `N = 8` IQ bursts and computes the CAF-NCC background floor:
+
+```
+bg_eff = 0.4 × bg_max + 0.6 × bg_avg          (outlier-robust weighted estimate)
+th     = max(HARD_FLOOR, bg_eff × NOISE_MARGIN) (per-sector, independent)
+```
+
+| Parameter | Value | Rationale |
+|-----------|-------|-----------|
+| `NOISE_MARGIN` | 2.0× | PSR + CFS funnel provides the primary false-alarm guard |
+| `BG_MAX_WEIGHT` | 0.40 | Reduces single-burst SMPS spike influence |
+| `HARD_FLOOR_30K` | 1.8% | 8× theoretical NCC floor (1/√200 000 ≈ 0.22%) |
+| `HARD_FLOOR_15K` | 1.4% | 6× theoretical NCC floor |
+| `ALPHA_SCAN_30K` | 22–30 kHz | Covers OcuSync CP variants (CP=1/8 → 26.7 kHz, CP=1/4 → 24.0 kHz) |
+| `ALPHA_SCAN_15K` | 10.5–14.5 kHz | Covers OcuSync 15 kHz channel variants |
+
+Calibrated thresholds are written to `rf_zynq/s3_thresholds.json` (git-ignored) and loaded dynamically at startup. **The source code is never patched** — no Git conflicts occur across deployments.
+
+### Calibration Console Output (example)
+
+```
+  [Sector 5785MHz]  OcuSync 30kHz: avg=0.31%  max=0.91%
+  [Sector 5745MHz]  OcuSync 30kHz: avg=0.55%  max=1.21%
+  [Sector 5825MHz]  OcuSync 30kHz: avg=1.04%  max=2.50%
+
+  Per-sector derived thresholds  (NOISE_MARGIN = 2.0×)
+  5785 MHz:  TH_30k= 1.80%   TH_15k= 1.40%   ← hard floor (clean sector)
+  5745 MHz:  TH_30k= 2.45%   TH_15k= 1.40%
+  5825 MHz:  TH_30k= 3.25%   TH_15k= 1.95%
+```
+
+## 5. Asymmetric Fusion Methodology
 Differing from conventional Boolean AND-logic fusion, this system implements independent, asynchronous trigger paths to maximize detection recall:
 
 1.  **RF Trigger (Primary)** — S3 CAF-FFT discriminator confirms OcuSync protocol fingerprint and fires an alert with a cyclic spectrum snapshot.
@@ -72,43 +111,60 @@ Differing from conventional Boolean AND-logic fusion, this system implements ind
 
 Both trigger paths produce a fused composite evidence image (RF waterfall + optical frame) stored in the SQLite3 alert database.
 
-## 5. Software Stack & Module Organization
+## 6. Software Stack & Module Organization
 
 ```
 RF-Vision-UAV-Tracker/
-├── system_hub.py            # Entry point & central pipeline orchestrator
+├── system_hub.py                    # Entry point & central pipeline orchestrator
 ├── backend_rk3588/
-│   ├── config.py            # Centralized hardware configuration
-│   └── main_rf_pipeline.py  # RFToolchain: S1→S2→S3 pipeline controller
+│   ├── config.py                    # Centralized hardware configuration (gain, URI, sectors)
+│   └── main_rf_pipeline.py          # RFToolchain: S1→S2→S3 pipeline controller
 ├── rf_zynq/
-│   ├── rf_stage1_rssi_scan.py       # S1: Fast RSSI frequency scan
+│   ├── rf_stage1_rssi_scan.py       # S1: EMA-weighted fast RSSI frequency scan
 │   ├── rf_stage2_waterfall_yolo.py  # S2: IQ → STFT waterfall tensor
 │   ├── rf_stage3_cyclostationary.py # S3: CAF-FFT cyclic frequency discriminator
-│   ├── calibrate_s3.py              # S3 one-click field calibration wizard
+│   ├── calibrate_s3.py              # S3 autonomous field calibration wizard
+│   ├── s3_thresholds.json           # Runtime thresholds (git-ignored, auto-generated)
 │   └── rknn_infer.py                # RKNN-Lite2 YOLOv8 NPU inference wrapper
 ├── vision_k230/
-│   └── k230_client.py       # RTSP video + UDP telemetry network client
+│   └── k230_client.py               # RTSP video + UDP telemetry network client
 ├── ui_qt/
-│   └── gui_host.py          # PyQt5 presentation layer (View only)
+│   └── gui_host.py                  # PyQt5 presentation layer (View only)
 ├── database/
-│   └── db_manager.py        # SQLite3 alert persistence & LRU management
+│   └── db_manager.py                # SQLite3 alert persistence & LRU management
 ├── tools/
-│   └── convert_yolo_to_rknn.py  # YOLOv8 → RKNN INT8 offline converter
+│   └── convert_yolo_to_rknn.py      # YOLOv8 → RKNN INT8 offline converter
 ├── mock_transmitter/
-│   ├── uav_tx_gui.py        # PlutoSDR UAV RF target simulator GUI
-│   └── mock_k230.py         # PC-side K230 simulator (MJPEG + UDP)
-├── deploy_orangepi.sh           # One-shot Orange Pi 5 environment setup
+│   ├── uav_tx_gui.py                # PlutoSDR UAV RF target simulator GUI
+│   │                                  Supports: DJI Mini 4 Pro / Mavic 3 / Avata 2 /
+│   │                                            FPV Combo (4 bandwidth variants each)
+│   │                                  Modes: frequency-hopping OR single-sector
+│   └── mock_k230.py                 # PC-side K230 simulator (MJPEG + UDP)
+├── deploy_orangepi.sh               # One-shot Orange Pi 5 environment setup
+└── .gitignore                       # Excludes s3_thresholds.json & *.pyc only
 ```
 
-## 6. Deployment Instructions
+## 7. Deployment Instructions
 
 ```bash
 # Clone the repository
 git clone https://github.com/ALPssdz/RF-Vision-UAV-Tracker.git
 cd RF-Vision-UAV-Tracker
 
-# Launch the system (first run will prompt for S3 threshold calibration)
+# Launch the system
+# → Automatic ambient calibration runs first (~60 s), then detection begins
 python3 system_hub.py
+```
+
+> **Note**: `rf_zynq/s3_thresholds.json` is created locally on each device and is excluded from Git. Re-run `system_hub.py` whenever the deployment environment changes (new location, changed interference floor, RX gain adjustment).
+
+### Adjust SDR Parameters (`backend_rk3588/config.py`)
+
+```python
+SDR_URI      = "ip:192.168.31.10"          # AD9364 network address
+SDR_GAIN_DB  = 70                           # MGC RX gain (dB); AD9364 max ≈ 73 dB
+SAMPLE_RATE  = int(40e6)                    # 40 MSps
+SWEEP_SECTORS = [5745e6, 5785e6, 5825e6]   # OcuSync 5.8 GHz band sectors
 ```
 
 ### (Optional) Convert YOLOv8 Weights to RKNN INT8
@@ -118,3 +174,18 @@ Run on **x86 Linux / WSL2**, then copy `best.rknn` to the Orange Pi:
 ```bash
 python tools/convert_yolo_to_rknn.py
 ```
+
+## 8. Validated Detection Performance
+
+Field-validated on **2026-04-06** with PlutoSDR mock transmitter (DJI Mini 4 Pro / Mavic 3 IQ dataset) and AD9364 receiver at 70 dB MGC gain:
+
+| Event | Sector | combined NCC | Threshold | PSR | CFS | Result |
+|-------|--------|-------------|-----------|-------|-------|--------|
+| OcuSync detected | 5785 MHz | 3.92% | 1.80% | 7.6× | 4.9× | ✅ CONFIRMED |
+| OcuSync detected (weak) | 5785 MHz | 2.02% | 1.80% | 6.0× | 5.8× | ✅ CONFIRMED |
+| OcuSync detected | 5785 MHz | 3.46% | 1.80% | 10.1× | 3.5× | ✅ CONFIRMED |
+| OcuSync detected | 5825 MHz | 7.85% | 3.25% | 18.4× | 2.6× | ✅ CONFIRMED |
+| SMPS burst (α=14.4 kHz) | 5825 MHz | 9.40% | — | 2.6× | **1.06×** | ❌ Rejected (CFS) |
+| Wideband noise | 5745 MHz | 1.82% | — | **2.35×** | 1.78× | ❌ Rejected (PSR) |
+
+**Consistent detected alpha: 27.99 kHz** → corresponds to OcuSync OFDM symbol structure with CP=1/4 at 35 kHz subcarrier spacing (N_total = 1429 samples @ 40 MSps).
