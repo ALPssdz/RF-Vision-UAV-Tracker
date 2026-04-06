@@ -10,7 +10,6 @@ rknn_env/
 runs/
 *.pt
 *.onnx
-*.rknn
 
 # ── 运行时产物（数据库 & 告警截图）────────────────────────
 database/rf_alert_history.db
