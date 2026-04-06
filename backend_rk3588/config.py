@@ -19,7 +19,7 @@ IS_RK3588 = (platform.machine() == 'aarch64')
 # SDR 前端参数（AD9364 + ZYNQ7020，经 libiio 网络后端连接）
 # ──────────────────────────────────────────────────────────────────────────────
 SDR_URI         = "ip:192.168.31.10"   # AD9364 SDR 网络地址（按实际局域网修改）
-SDR_GAIN_DB     = 65                   # 接收增益（dB），MGC 手动增益模式
+SDR_GAIN_DB     = 70                   # 接收增益（dB），MGC 手动增益模式
 SAMPLE_RATE     = int(40e6)            # ADC 采样率（40 MSps）
 SWEEP_SECTORS   = [5745e6, 5785e6, 5825e6]  # 5.8GHz OcuSync 三扇区中心频率（Hz）
 

@@ -58,10 +58,14 @@ MIN_POWER_GATE   = 1e-5
 #   0.6*avg) reduces outlier influence while retaining sensitivity to
 #   sustained elevated backgrounds.
 #
-# NOISE_MARGIN = 3.0: with this tighter bg_eff estimate, 3x provides the same
-#   statistical guard as 5x would on the raw max, and PSR+CFS checks provide
-#   additional false-alarm rejection.
-NOISE_MARGIN   = 3.0
+# NOISE_MARGIN = 2.0: the primary false-alarm guard is NOT the NCC threshold
+# alone, but the Level 3 PSR test (peak-to-sidelobe ratio of the tau-domain
+# CAF) and Level 4 CFS test (cyclic-frequency concentration).
+# True OcuSync: PSR >> 2.5, CFS >> 1.8 -> passes both gates.
+# SMPS burst: PSR ~ 1.0-1.5, CFS ~ 1.0-1.2 -> rejected by both gates.
+# This allows NOISE_MARGIN to be set tightly (2.0x) while keeping overall
+# system Pfa < 0.1% via the multi-stage funnel.
+NOISE_MARGIN   = 2.0
 BG_MAX_WEIGHT  = 0.4    # weight on bg_max;  (1-0.4)=0.6 weight on bg_avg
 HARD_FLOOR_30K = 0.018  # 1.8%  (8x theoretical NCC floor 1/sqrt(200000))
 HARD_FLOOR_15K = 0.014  # 1.4%  (6x theoretical NCC floor)
