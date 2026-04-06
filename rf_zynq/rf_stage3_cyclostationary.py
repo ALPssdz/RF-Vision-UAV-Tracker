@@ -97,9 +97,9 @@ class RF_Stage3_CycloAudit:
 
     # ─── Frame analysis parameters ────────────────────────────────────────────
     # CHUNK_SIZE must match calibrate_s3.py CHUNK_SIZE for consistent NCC comparison.
-    # Larger chunk: lower NCC noise floor (0.158% vs 0.224% with 200k),
-    #               so calibrated thresholds are more tightly fitted to true background.
-    CHUNK_SIZE = 400_000
+    # 200k (5 ms): SMPS harmonics average out better in shorter windows.
+    # 400k was tested but found to amplify SMPS cyclostationary components.
+    CHUNK_SIZE = 200_000
     OVERLAP    = 0.75   # 75% overlap -> ~4x more frames per buffer; better averaging
 
     def __init__(self, sample_rate: float = 40e6):

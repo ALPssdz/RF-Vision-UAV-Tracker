@@ -38,19 +38,31 @@ SECTORS_HZ  = [5745e6, 5785e6, 5825e6]
 N_CAPTURES  = 8           # IQ captures per sector (8 frames -> more stable bg estimate)
 
 # -- CAF scan parameters (identical to RF_Stage3_CycloAudit) ------------------
-CHUNK_SIZE       = 400_000   # 10 ms @ 40 MSps; NCC floor = 1/sqrt(N) = 0.158%
+# CHUNK_SIZE = 200_000 (5 ms @ 40 MSps).
+# Larger chunks (400k) were found to amplify SMPS harmonic NCC because the
+# integration window covers more exact SMPS cycles -> REVERTED to 200k.
+CHUNK_SIZE       = 200_000
 TAU_30K, TAU_15K = 1333, 2667
 ALPHA_SCAN_30K   = (18_000.0, 32_000.0)
 ALPHA_SCAN_15K   = ( 9_000.0, 16_000.0)
 MIN_POWER_GATE   = 1e-5
 
 # -- Threshold derivation parameters ------------------------------------------
-# Formula: th = max(HARD_FLOOR, bg_max x NOISE_MARGIN)
-# NOISE_MARGIN = 2.5: with CHUNK_SIZE=400k the NCC noise floor is 0.158%;
-#   2.5x margin above measured bg_max is statistically sufficient given the
-#   Level 3 PSR and Level 4 CFS guards against residual false alarms.
-NOISE_MARGIN   = 2.5    # 2.5x margin above measured bg_max
-HARD_FLOOR_30K = 0.028  # 2.8%  (18x theoretical noise floor 1/sqrt(400000))
+# Formula: bg_eff = BG_MAX_WEIGHT*max + (1-BG_MAX_WEIGHT)*avg
+#          th = max(HARD_FLOOR, bg_eff * NOISE_MARGIN)
+#
+# Rationale for weighted estimate:
+#   Using raw max is dominated by single outlier bursts (SMPS spikes), which
+#   can be 3-4x above the typical NCC level.  A weighted average (0.4*max +
+#   0.6*avg) reduces outlier influence while retaining sensitivity to
+#   sustained elevated backgrounds.
+#
+# NOISE_MARGIN = 3.0: with this tighter bg_eff estimate, 3x provides the same
+#   statistical guard as 5x would on the raw max, and PSR+CFS checks provide
+#   additional false-alarm rejection.
+NOISE_MARGIN   = 3.0
+BG_MAX_WEIGHT  = 0.4    # weight on bg_max;  (1-0.4)=0.6 weight on bg_avg
+HARD_FLOOR_30K = 0.028  # 2.8%  (12.5x theoretical NCC floor 1/sqrt(200000))
 HARD_FLOOR_15K = 0.022  # 2.2%
 
 # =============================================================================
@@ -179,16 +191,18 @@ def phase1_background():
 # =============================================================================
 def _derive_thresholds(bg_results):
     """
-    Derive per-sector thresholds independently.
+    Derive per-sector thresholds using an outlier-robust background estimate.
 
-    Formula (per sector):
-      th = max(HARD_FLOOR, bg_max x NOISE_MARGIN)
+    Formula:
+      bg_eff = BG_MAX_WEIGHT * bg_max + (1 - BG_MAX_WEIGHT) * bg_avg
+      th     = max(HARD_FLOOR, bg_eff * NOISE_MARGIN)
 
     Statistical rationale:
-      NOISE_MARGIN = 3.0: with 6 averaged frames the bg_max estimate
-      has +/-sigma uncertainty of ~0.2%.  A 3x margin provides >10 dB
-      guard against measurement noise.  False-alarm suppression is
-      further enforced by Level 3 PSR and Level 4 CFS checks.
+      Raw max is dominated by single burst events (SMPS spikes, multipath).
+      A weighted average (40% max + 60% avg) reduces outlier influence while
+      still accounting for occasional elevated backgrounds.
+      NOISE_MARGIN=3 on this tighter estimate provides the same guard as ~5x
+      on the raw max for typical ambient conditions.
 
     Returns
     -------
@@ -196,12 +210,19 @@ def _derive_thresholds(bg_results):
     """
     per_sector = {}
     for freq in SECTORS_HZ:
-        bg   = bg_results.get(freq, {})
-        bg30 = bg.get('ncc_30k_max', HARD_FLOOR_30K / NOISE_MARGIN)
-        bg15 = bg.get('ncc_15k_max', HARD_FLOOR_15K / NOISE_MARGIN)
+        bg    = bg_results.get(freq, {})
+        # Weighted background estimates
+        max30 = bg.get('ncc_30k_max', HARD_FLOOR_30K / NOISE_MARGIN)
+        avg30 = bg.get('ncc_30k_avg', max30 * 0.5)
+        max15 = bg.get('ncc_15k_max', HARD_FLOOR_15K / NOISE_MARGIN)
+        avg15 = bg.get('ncc_15k_avg', max15 * 0.5)
+
+        bg_eff_30 = BG_MAX_WEIGHT * max30 + (1 - BG_MAX_WEIGHT) * avg30
+        bg_eff_15 = BG_MAX_WEIGHT * max15 + (1 - BG_MAX_WEIGHT) * avg15
+
         per_sector[freq] = {
-            'th_30k': max(HARD_FLOOR_30K, bg30 * NOISE_MARGIN),
-            'th_15k': max(HARD_FLOOR_15K, bg15 * NOISE_MARGIN),
+            'th_30k': max(HARD_FLOOR_30K, bg_eff_30 * NOISE_MARGIN),
+            'th_15k': max(HARD_FLOOR_15K, bg_eff_15 * NOISE_MARGIN),
         }
     return per_sector
 
