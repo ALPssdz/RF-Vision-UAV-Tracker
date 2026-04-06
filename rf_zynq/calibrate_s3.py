@@ -196,45 +196,33 @@ def _derive_thresholds(bg_results):
     return max(th30), max(th15)
 
 
+THRESHOLD_JSON = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                              "s3_thresholds.json")
+
+
 def phase2_apply(th_30k, th_15k):
     """
-    Patch THRESHOLD_30K and THRESHOLD_15K in rf_stage3_cyclostationary.py
-    using regex substitution. Backs up the original file first.
+    Persist calibrated thresholds to s3_thresholds.json (git-ignored).
+    RF_Stage3_CycloAudit.__init__() reads this file at startup.
+    The source file is never modified -- no git conflicts.
     """
+    import json
+    from datetime import datetime
     print("\n" + "=" * 60)
-    print("  Phase 2 -- Writing thresholds")
-    print(f"  THRESHOLD_30K: {th_30k*100:.2f}%")
-    print(f"  THRESHOLD_15K: {th_15k*100:.2f}%")
-    print(f"  Target: {S3_SOURCE}")
+    print("  Phase 2 -- Saving thresholds to JSON")
+    print(f"  THRESHOLD_30K : {th_30k*100:.2f}%")
+    print(f"  THRESHOLD_15K : {th_15k*100:.2f}%")
+    print(f"  File          : {THRESHOLD_JSON}")
     print("=" * 60)
 
-    with open(S3_SOURCE, 'r', encoding='utf-8') as f:
-        src = f.read()
-
-    src_new = re.sub(
-        r'(THRESHOLD_30K\s*=\s*)[\d.]+',
-        lambda m: f'{m.group(1)}{th_30k:.4f}',
-        src
-    )
-    src_new = re.sub(
-        r'(THRESHOLD_15K\s*=\s*)[\d.]+',
-        lambda m: f'{m.group(1)}{th_15k:.4f}',
-        src_new
-    )
-
-    if src_new == src:
-        print("  [!] Threshold lines not found or already up-to-date.")
-        return False
-
-    backup = S3_SOURCE + '.bak'
-    with open(backup, 'w', encoding='utf-8') as f:
-        f.write(src)
-    print(f"  Backup saved: {backup}")
-
-    with open(S3_SOURCE, 'w', encoding='utf-8') as f:
-        f.write(src_new)
-    print("  OK -- thresholds written.")
-    return True
+    payload = {
+        "THRESHOLD_30K": round(th_30k, 6),
+        "THRESHOLD_15K": round(th_15k, 6),
+        "calibrated_at": datetime.now().isoformat(timespec='seconds'),
+    }
+    with open(THRESHOLD_JSON, 'w') as f:
+        json.dump(payload, f, indent=2)
+    print(f"  OK -- thresholds saved.")
 
 
 # =============================================================================

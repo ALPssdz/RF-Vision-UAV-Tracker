@@ -99,7 +99,25 @@ class RF_Stage3_CycloAudit:
 
     def __init__(self, sample_rate: float = 40e6):
         self.sample_rate = float(sample_rate)
-        self._freq_res   = None   # 将在首次 run_spectral_audit 按实际 chunk 设置
+        self._freq_res   = None   # set on first run_spectral_audit call
+
+        # Load field-calibrated thresholds from JSON if available.
+        # The JSON is written by calibrate_s3.py and is git-ignored,
+        # so the source file is never modified by calibration.
+        import os, json
+        _json = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                             "s3_thresholds.json")
+        if os.path.exists(_json):
+            try:
+                with open(_json) as _f:
+                    _t = json.load(_f)
+                self.THRESHOLD_30K = float(_t["THRESHOLD_30K"])
+                self.THRESHOLD_15K = float(_t["THRESHOLD_15K"])
+                print(f"  [S3] Thresholds loaded from JSON: "
+                      f"30k={self.THRESHOLD_30K*100:.2f}%  "
+                      f"15k={self.THRESHOLD_15K*100:.2f}%")
+            except Exception as _e:
+                print(f"  [S3] Failed to load s3_thresholds.json ({_e}), using defaults.")
 
     # =========================================================================
     # 内核：CAF-FFT 计算
