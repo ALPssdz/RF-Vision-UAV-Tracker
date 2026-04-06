@@ -61,27 +61,34 @@ class RF_Stage3_CycloAudit:
     TAU_OCUSYNC_15K = 2667   # OcuSync 2.0       N_fft = 40MHz/15kHz
     TAU_WIFI        = 128    # IEEE 802.11        N_fft = 40MHz/312.5kHz
 
-    # OcuSync 循环频率扫描范围（Hz），覆盖 CP_ratio ∈ [1/8, 1/3]
-    # α_sym = Fs / (N_fft + N_cp) = Fs / (N_fft · (1 + CP_ratio))
-    #   CP=1/8 → α = 40MHz/(1333·1.125) = 26.7 kHz (30k 通道)
-    #   CP=1/3 → α = 40MHz/(1333·1.333) = 22.5 kHz
-    ALPHA_SCAN_30K = (18_000.0, 32_000.0)   # 扫描窗口略宽，余量 ±2kHz
-    ALPHA_SCAN_15K = ( 9_000.0, 16_000.0)
+    # OcuSync cyclic-frequency scan range (Hz).
+    # Theoretical alpha = Fs / (N_fft * (1 + CP_ratio))
+    #   CP=1/8: alpha_30k = 40MHz/(1333*1.125) = 26.7 kHz
+    #   CP=1/4: alpha_30k = 40MHz/(1333*1.250) = 24.0 kHz
+    # Scan window: 22-30 kHz covers all CP variants with +-2 kHz guard.
+    # Narrower than the original 18-32 kHz to exclude SMPS harmonics
+    # that can leak into the wider window and inflate background NCC.
+    ALPHA_SCAN_30K = (22_000.0, 30_000.0)   # OcuSync 30kHz channel
+    ALPHA_SCAN_15K = (10_500.0, 14_500.0)   # OcuSync 15kHz channel: 12-13.3 kHz (+- guard)
 
     # WiFi 监控循环频率（仅用于日志输出，不参与判决）
     ALPHA_WIFI_HZ  = 250_000.0
 
     # ─── 决策阈值 ────────────────────────────────────────────────────────────
     # CAF-NCC noise floor (theoretical): 1/sqrt(N)
-    #   N=400000: sigma = 0.158%  (N=200000 was 0.224%)
-    # Hard floors set at ~18x theoretical floor  (Pfa << 0.1%)
-    # Additional false-alarm rejection provided by Level 3 PSR + Level 4 CFS.
-    THRESHOLD_30K = 0.028   # 2.8% hard floor
-    THRESHOLD_15K = 0.022   # 2.2% hard floor
+    #   N=200000: sigma = 0.224%
+    # Hard floors set at 8x / 6x theoretical floor respectively.
+    # This is generous given PSR+CFS provide additional false-alarm rejection.
+    # Previous 2.8%/2.2% were 12.5x/10x and prevented the calibrated thresholds
+    # from being used in clean environments (bg_eff below floor).
+    THRESHOLD_30K = 0.018   # 1.8% hard floor  (8x theoretical floor)
+    THRESHOLD_15K = 0.014   # 1.4% hard floor  (6x theoretical floor)
 
     # Combined score: PEAK_WEIGHT * peak  +  (1-PEAK_WEIGHT) * avg
-    # Lower peak weight -> more averaging weight -> better SNR for persistent weak signals
-    PEAK_WEIGHT = 0.35
+    # OcuSync operates with non-100% duty cycle; burst frames have high NCC
+    # while silence frames are at noise floor.  Higher peak weight detects
+    # sparse bursts faster; PSR + CFS guards prevent single-spike false alarms.
+    PEAK_WEIGHT = 0.50
 
     # τ 域峰值旁瓣比（PSR）阈值
     # OFDM CP 峰为 Delta 冲激，PSR >> 1；SMPS/宽带干扰 PSR ≈ 1

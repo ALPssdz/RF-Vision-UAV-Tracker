@@ -44,8 +44,8 @@ N_CAPTURES  = 8           # IQ captures per sector (8 frames -> more stable bg e
 # integration window covers more exact SMPS cycles -> REVERTED to 200k.
 CHUNK_SIZE       = 200_000
 TAU_30K, TAU_15K = 1333, 2667
-ALPHA_SCAN_30K   = (18_000.0, 32_000.0)
-ALPHA_SCAN_15K   = ( 9_000.0, 16_000.0)
+ALPHA_SCAN_30K   = (22_000.0, 30_000.0)   # narrowed to OcuSync CP range
+ALPHA_SCAN_15K   = (10_500.0, 14_500.0)
 MIN_POWER_GATE   = 1e-5
 
 # -- Threshold derivation parameters ------------------------------------------
@@ -63,8 +63,8 @@ MIN_POWER_GATE   = 1e-5
 #   additional false-alarm rejection.
 NOISE_MARGIN   = 3.0
 BG_MAX_WEIGHT  = 0.4    # weight on bg_max;  (1-0.4)=0.6 weight on bg_avg
-HARD_FLOOR_30K = 0.028  # 2.8%  (12.5x theoretical NCC floor 1/sqrt(200000))
-HARD_FLOOR_15K = 0.022  # 2.2%
+HARD_FLOOR_30K = 0.018  # 1.8%  (8x theoretical NCC floor 1/sqrt(200000))
+HARD_FLOOR_15K = 0.014  # 1.4%  (6x theoretical NCC floor)
 
 # =============================================================================
 # Core CAF-FFT metric (identical algorithm to RF_Stage3_CycloAudit)
