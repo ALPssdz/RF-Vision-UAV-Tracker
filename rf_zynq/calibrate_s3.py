@@ -29,10 +29,11 @@ S3_SOURCE = os.path.join(_PROJ_ROOT, "rf_zynq", "rf_stage3_cyclostationary.py")
 OUT_DIR   = os.path.join(_PROJ_ROOT, "database", "alert_images")
 os.makedirs(OUT_DIR, exist_ok=True)
 
-# -- SDR parameters (aligned with backend_rk3588/config.py) ------------------
-SDR_URI     = "ip:192.168.31.10"
-SAMPLE_RATE = int(40e6)
-RX_GAIN     = 50
+# -- SDR parameters (read from config.py -- same values used at runtime) ------
+# IMPORTANT: calibration gain MUST equal operational gain (config.SDR_GAIN_DB).
+# Loading from config ensures a single source of truth.
+from backend_rk3588.config import SDR_URI, SAMPLE_RATE, SDR_GAIN_DB
+RX_GAIN     = SDR_GAIN_DB
 BUFFER_SIZE = 2_621_440   # 65 ms @ 40 MSps
 SECTORS_HZ  = [5745e6, 5785e6, 5825e6]
 N_CAPTURES  = 8           # IQ captures per sector (8 frames -> more stable bg estimate)
