@@ -35,10 +35,10 @@ SAMPLE_RATE = int(40e6)
 RX_GAIN     = 50
 BUFFER_SIZE = 2_621_440   # 65 ms @ 40 MSps
 SECTORS_HZ  = [5745e6, 5785e6, 5825e6]
-N_CAPTURES  = 6           # IQ captures per sector
+N_CAPTURES  = 8           # IQ captures per sector (8 frames -> more stable bg estimate)
 
 # -- CAF scan parameters (identical to RF_Stage3_CycloAudit) ------------------
-CHUNK_SIZE       = 200_000
+CHUNK_SIZE       = 400_000   # 10 ms @ 40 MSps; NCC floor = 1/sqrt(N) = 0.158%
 TAU_30K, TAU_15K = 1333, 2667
 ALPHA_SCAN_30K   = (18_000.0, 32_000.0)
 ALPHA_SCAN_15K   = ( 9_000.0, 16_000.0)
@@ -46,11 +46,11 @@ MIN_POWER_GATE   = 1e-5
 
 # -- Threshold derivation parameters ------------------------------------------
 # Formula: th = max(HARD_FLOOR, bg_max x NOISE_MARGIN)
-# NOISE_MARGIN = 3.0 (3x is statistically sufficient; PSR+CFS checks provide
-#   additional false-positive rejection, so no need for a 5x bloat)
-# HARD_FLOOR  = absolute minimum derived from 1/sqrt(N) theoretical noise floor
-NOISE_MARGIN   = 3.0    # 3x margin above measured bg_max
-HARD_FLOOR_30K = 0.028  # 2.8%  (13x theoretical noise floor 1/sqrt(200000))
+# NOISE_MARGIN = 2.5: with CHUNK_SIZE=400k the NCC noise floor is 0.158%;
+#   2.5x margin above measured bg_max is statistically sufficient given the
+#   Level 3 PSR and Level 4 CFS guards against residual false alarms.
+NOISE_MARGIN   = 2.5    # 2.5x margin above measured bg_max
+HARD_FLOOR_30K = 0.028  # 2.8%  (18x theoretical noise floor 1/sqrt(400000))
 HARD_FLOOR_15K = 0.022  # 2.2%
 
 # =============================================================================

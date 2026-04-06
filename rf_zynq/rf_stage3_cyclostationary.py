@@ -72,14 +72,16 @@ class RF_Stage3_CycloAudit:
     ALPHA_WIFI_HZ  = 250_000.0
 
     # ─── 决策阈值 ────────────────────────────────────────────────────────────
-    # CAF-NCC 噪声底理论值：≈ 1/√N = 1/√200000 ≈ 0.22%
-    # 保守设定为噪声底的 10~12 倍（Pfa << 0.1%），同时兼顾弱信号灵敏度
-    THRESHOLD_30K = 0.028   # 2.8%（原 7%；WiFi 已被循环频率正交性抑制）
-    THRESHOLD_15K = 0.022   # 2.2%（原 6%）
+    # CAF-NCC noise floor (theoretical): 1/sqrt(N)
+    #   N=400000: sigma = 0.158%  (N=200000 was 0.224%)
+    # Hard floors set at ~18x theoretical floor  (Pfa << 0.1%)
+    # Additional false-alarm rejection provided by Level 3 PSR + Level 4 CFS.
+    THRESHOLD_30K = 0.028   # 2.8% hard floor
+    THRESHOLD_15K = 0.022   # 2.2% hard floor
 
-    # 联合统计量权重：peak_weight × 峰值 + (1 - peak_weight) × 帧均值
-    # 较高的均值权重使持续弱信号有更多帧叠加 SNR 增益
-    PEAK_WEIGHT = 0.45
+    # Combined score: PEAK_WEIGHT * peak  +  (1-PEAK_WEIGHT) * avg
+    # Lower peak weight -> more averaging weight -> better SNR for persistent weak signals
+    PEAK_WEIGHT = 0.35
 
     # τ 域峰值旁瓣比（PSR）阈值
     # OFDM CP 峰为 Delta 冲激，PSR >> 1；SMPS/宽带干扰 PSR ≈ 1
@@ -93,9 +95,12 @@ class RF_Stage3_CycloAudit:
     # 功率门控（与 v2.x 保持一致）
     MIN_POWER_GATE = 1e-5
 
-    # ─── 帧分析参数 ──────────────────────────────────────────────────────────
-    CHUNK_SIZE = 200_000
-    OVERLAP    = 0.50          # 50% 帧重叠，确保帧边界处的突发包不被漏检
+    # ─── Frame analysis parameters ────────────────────────────────────────────
+    # CHUNK_SIZE must match calibrate_s3.py CHUNK_SIZE for consistent NCC comparison.
+    # Larger chunk: lower NCC noise floor (0.158% vs 0.224% with 200k),
+    #               so calibrated thresholds are more tightly fitted to true background.
+    CHUNK_SIZE = 400_000
+    OVERLAP    = 0.75   # 75% overlap -> ~4x more frames per buffer; better averaging
 
     def __init__(self, sample_rate: float = 40e6):
         self.sample_rate = float(sample_rate)
