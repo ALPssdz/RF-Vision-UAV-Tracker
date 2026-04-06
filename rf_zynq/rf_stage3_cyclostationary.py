@@ -299,7 +299,7 @@ class RF_Stage3_CycloAudit:
             chunks_by_frame.append(x)
 
         if not frames_30k:
-            print("  [S3-v3] 警告：有效帧为 0（全部功率低于门控阈值）")
+            print("  [S3-v3] WARNING: no valid frames (all below power gate)")
             return False, 0.0
 
         arr_30k = np.array([f[0] for f in frames_30k])
@@ -330,7 +330,7 @@ class RF_Stage3_CycloAudit:
             f"→ combined={combined_30k*100:.2f}% (th={self.THRESHOLD_30K*100:.1f}%) | "
             f"OcuSync15k: peak={peak_15k*100:.2f}% avg={avg_15k*100:.2f}% "
             f"→ combined={combined_15k*100:.2f}% (th={self.THRESHOLD_15K*100:.1f}%) | "
-            f"WiFi@250kHz(监控)={wifi_ncc*100:.2f}%"
+            f"WiFi@250kHz(monitor)={wifi_ncc*100:.2f}%"
         )
 
         # ── Level 2：联合统计量一级门限 ────────────────────────────────────
@@ -349,7 +349,7 @@ class RF_Stage3_CycloAudit:
             triggered_score = combined_15k
 
         if triggered_ch is None:
-            print("  [S3-v3] 未超过检测阈值 — 无人机未检测到。")
+            print("  [S3-v3] Below threshold -- no UAV detected.")
             return False, max(combined_30k, combined_15k)
 
         # 取触发通道的最强帧和对应参数
@@ -379,14 +379,14 @@ class RF_Stage3_CycloAudit:
         psr    = self._compute_psr(best_x, pwr_best, tau_t, alpha_best)
 
         print(
-            f"  [S3-v3] PSR 验证: τ={tau_t}, α_best={alpha_best/1e3:.1f}kHz, "
+            f"  [S3-v3] PSR check: tau={tau_t}, alpha={alpha_best/1e3:.1f}kHz, "
             f"PSR={psr:.2f}x (th={psr_th:.1f}x), CFS={cfs_best:.2f}x (th={self.CFS_THRESHOLD:.1f}x)"
         )
 
         if psr < psr_th:
             print(
-                f"  [S3-v3] PSR 验证失败 ({psr:.2f}x < {psr_th:.1f}x) — "
-                f"时延峰宽平，判定为宽带干扰/SMPS，告警抑制。"
+                f"  [S3-v3] PSR check failed ({psr:.2f}x < {psr_th:.1f}x) -- "
+                f"flat delay peak, classified as wideband/SMPS interference. Alert suppressed."
             )
             return False, triggered_score
 
@@ -395,14 +395,13 @@ class RF_Stage3_CycloAudit:
         # 宽带干扰（如杂散谐波）：CAF 谱平坦（CFS ≈ 1）
         if cfs_best < self.CFS_THRESHOLD:
             print(
-                f"  [S3-v3] CFS 验证失败 ({cfs_best:.2f}x < {self.CFS_THRESHOLD:.1f}x) — "
-                f"循环频率分散，非 OcuSync 特征，告警抑制。"
+                f"  [S3-v3] CFS check failed ({cfs_best:.2f}x < {self.CFS_THRESHOLD:.1f}x) -- "
+                f"diffuse cycle spectrum, not OcuSync. Alert suppressed."
             )
             return False, triggered_score
 
-        # ── 通过全部验证：生成诊断快照 ─────────────────────────────────────
-        print(f"  [S3-v3] ✓ 检测确认：{label}")
-        print(f"           NCC={triggered_score*100:.2f}%  α_best={alpha_best/1e3:.2f}kHz  "
+        print(f"  [S3-v3] CONFIRMED: {label}")
+        print(f"           NCC={triggered_score*100:.2f}%  alpha={alpha_best/1e3:.2f}kHz  "
               f"PSR={psr:.1f}x  CFS={cfs_best:.1f}x")
 
         self._save_snapshot(best_x, pwr_best, tau_t, alpha_best,
@@ -423,11 +422,11 @@ class RF_Stage3_CycloAudit:
         channel: str,
         label: str,
     ):
-        """生成并保存 CAF 谱快照（双子图：τ=30k 通道 + τ=15k 通道）。"""
+        """Generate and save CAF spectrum snapshot (two subplots: 30k and 15k channels)."""
         try:
             import matplotlib
             matplotlib.use('Agg')
-            matplotlib.rcParams['font.family'] = 'DejaVu Sans'
+            matplotlib.rcParams['font.family'] = ['DejaVu Sans']
             matplotlib.rcParams['axes.unicode_minus'] = False
             import matplotlib.pyplot as plt, os
 
@@ -440,28 +439,27 @@ class RF_Stage3_CycloAudit:
                 spec = self._compute_caf_spectrum(x, tau_plot, power)
                 N    = len(spec)
                 f_hz = np.arange(N) * (self.sample_rate / N)
-                # 仅绘制 0~350kHz（包含 WiFi 标志位，方便对比）
                 mask = f_hz < 350_000
                 ax.semilogy(f_hz[mask] / 1e3, spec[mask] + 1e-6,
-                            color='#FF5722', linewidth=1.0, label='CAF-NCC 谱')
+                            color='#FF5722', linewidth=1.0, label='CAF-NCC spectrum')
                 ax.axvspan(alpha_range[0]/1e3, alpha_range[1]/1e3,
-                           alpha=0.15, color='lime', label='OcuSync α 扫描窗口')
+                           alpha=0.15, color='lime', label='OcuSync scan window')
                 ax.axvline(self.ALPHA_WIFI_HZ / 1e3, color='orange',
                            linestyle='--', lw=1.2, label='WiFi 250kHz')
                 ax.axvline(alpha_best_hz / 1e3 if channel == ('30k' if ch_label=='30kHz' else '15k')
-                           else 0, color='cyan', linestyle=':', lw=1.5, label=f'α_best')
+                           else 0, color='cyan', linestyle=':', lw=1.5, label='alpha_best')
                 ax.axhline(self.THRESHOLD_30K if ch_label=='30kHz' else self.THRESHOLD_15K,
-                           color='red', linestyle='--', lw=1, label='检测阈值')
-                ax.set_title(f"CAF 谱 τ={tau_plot}  ({ch_label} 通道)", fontsize=11)
-                ax.set_xlabel("循环频率 α (kHz)")
+                           color='red', linestyle='--', lw=1, label='Threshold')
+                ax.set_title(f"CAF spectrum  tau={tau_plot}  ({ch_label} channel)", fontsize=11)
+                ax.set_xlabel("Cycle frequency alpha (kHz)")
                 ax.set_ylabel("NCC (log)")
                 ax.legend(fontsize=7)
                 ax.grid(alpha=0.3)
                 ax.set_xlim(0, 350)
 
             fig.suptitle(
-                f"S3 CAF-FFT Audit — {label}\n"
-                f"NCC={score*100:.2f}%  α={alpha_best_hz/1e3:.2f}kHz",
+                f"S3 CAF-FFT Audit -- {label}\n"
+                f"NCC={score*100:.2f}%  alpha={alpha_best_hz/1e3:.2f}kHz",
                 fontsize=12, fontweight='bold'
             )
             plt.tight_layout()
@@ -473,6 +471,7 @@ class RF_Stage3_CycloAudit:
             path = os.path.join(db_dir, f'S3_CAF_{channel}_{ts}.png')
             plt.savefig(path, dpi=130)
             plt.close()
-            print(f"  [S3-v3] 快照已保存 → {path}")
+            print(f"  [S3-v3] Snapshot saved: {path}")
         except Exception as e:
-            print(f"  [S3-v3] 快照生成失败（不影响检测）: {e}")
+            print(f"  [S3-v3] Snapshot failed (non-critical): {e}")
+
