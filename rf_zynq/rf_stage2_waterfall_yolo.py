@@ -140,6 +140,6 @@ class RF_Stage2_Dwell:
             * 255.0
         )
         waterfall_uint8 = waterfall_norm.astype(np.uint8)
-        waterfall_bgr   = cv2.applyColorMap(waterfall_uint8, cv2.COLORMAP_HOT)
+        waterfall_bgr   = cv2.applyColorMap(waterfall_uint8, cv2.COLORMAP_VIRIDIS)
 
         return waterfall_bgr
