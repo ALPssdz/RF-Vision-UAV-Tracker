@@ -29,7 +29,7 @@ from PyQt5.QtWidgets import (
     QPushButton, QLabel, QPlainTextEdit, QTabWidget,
     QTableWidget, QTableWidgetItem, QHeaderView,
     QMessageBox, QShortcut, QFrame, QProgressBar,
-    QSizePolicy, QGraphicsDropShadowEffect,
+    QSizePolicy,
 )
 from PyQt5.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve, pyqtProperty
 from PyQt5.QtGui import (QImage, QPixmap, QFont, QKeySequence,
@@ -269,11 +269,7 @@ class NeonBadge(QLabel):
         self._apply_style()
 
     def _apply_style(self):
-        glow = QGraphicsDropShadowEffect()
-        glow.setBlurRadius(18)
-        glow.setColor(QColor(self._color))
-        glow.setOffset(0, 0)
-        self.setGraphicsEffect(glow)
+
         self.setStyleSheet(f"""
             QLabel {{
                 color: {self._color};
@@ -454,11 +450,7 @@ class StatusBannerCard(QFrame):
         # 图标/指示灯
         self._lbl_dot = QLabel("●")
         self._lbl_dot.setStyleSheet(f"color: {color}; font-size: 18px;")
-        glow = QGraphicsDropShadowEffect()
-        glow.setBlurRadius(12)
-        glow.setColor(QColor(color))
-        glow.setOffset(0, 0)
-        self._lbl_dot.setGraphicsEffect(glow)
+
 
         # 文字块
         text_col = QVBoxLayout()
@@ -492,12 +484,7 @@ class StatusBannerCard(QFrame):
         if not active:
             dot_style = f"color: {PALETTE['text_muted']}; font-size: 18px;"
         self._lbl_dot.setStyleSheet(dot_style)
-        # 刷新 glow
-        glow = QGraphicsDropShadowEffect()
-        glow.setBlurRadius(12 if active else 0)
-        glow.setColor(QColor(c))
-        glow.setOffset(0, 0)
-        self._lbl_dot.setGraphicsEffect(glow)
+
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -636,11 +623,7 @@ class MainWindow(QMainWindow):
             font-size: 18px;
             font-weight: 800;
         """)
-        glow = QGraphicsDropShadowEffect()
-        glow.setBlurRadius(20)
-        glow.setColor(QColor(PALETTE['accent_blue']))
-        glow.setOffset(0, 0)
-        lbl_brand.setGraphicsEffect(glow)
+
 
         lbl_sub = QLabel("无人机多模态射频 · 视觉融合探测系统")
         lbl_sub.setStyleSheet(f"color: {PALETTE['text_muted']}; font-size: 12px; margin-left: 12px;")
