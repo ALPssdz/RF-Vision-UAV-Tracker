@@ -91,25 +91,13 @@ class RF_Stage3_CycloAudit:
     PEAK_WEIGHT = 0.50
 
     # τ 域峰值旁瓣比（PSR）阈值
-    # -----------------------------------------------------------------------
-    # 理论推导（弱信号 PSR 下界）：
-    #   PSR_OcuSync ≈ NCC_peak × √(CHUNK_SIZE - τ)
-    #               ≈ NCC_min × √198667 ≈ 0.018 × 446 ≈ 8.0×
-    # 即使在检测阈值边缘（NCC=1.8%），OcuSync 理论 PSR 仍约 8×。
-    # 3σ 最坏估计误差（n_side=20）使表观 PSR 最低约 4.4×。
-    # 阈值 3.0× 在 4.4× 下留有 1.4× 裕度，不会拦截弱 OcuSync。
-    # SMPS 宽平型峰实测 PSR 通常 < 2.5×，被 3.0× 可靠拒止。
-    # -----------------------------------------------------------------------
-    PSR_THRESHOLD      = 3.0   # 普通环境（从 2.5 调高，理论验证安全）
-    PSR_THRESHOLD_WIFI = 4.0   # 强 WiFi 监控区（从 3.2 调高）
+    # OFDM CP 峰为 Delta 冲激，PSR >> 1；SMPS/宽带干扰 PSR ≈ 1
+    PSR_THRESHOLD      = 2.5   # 普通环境
+    PSR_THRESHOLD_WIFI = 3.2   # 强 WiFi 监控区上调
 
     # α 域循环频率集中度（Cyclic Frequency Sharpness, CFS）阈值
-    # -----------------------------------------------------------------------
-    # 真实 OcuSync：α 峰集中于单 bin（200 Hz 宽），CFS = NCC/噪声底 >> 8×
-    # SMPS 谐波：在扫描窗口内分布多个 bin，CFS ≈ 1.5~2.0×
-    # 阈值 2.2× 在 8× 与 2.0× 之间留有充足分离裕量
-    # -----------------------------------------------------------------------
-    CFS_THRESHOLD = 2.2   # 从 1.8 调高（OcuSync 理论值 >>8×，安全）
+    # 真实 OcuSync：α 峰尖锐（CFS > CFS_TH）；宽带干扰：α 峰平坦（CFS < CFS_TH）
+    CFS_THRESHOLD = 1.8
 
     # 功率门控（与 v2.x 保持一致）
     MIN_POWER_GATE = 1e-5
@@ -255,7 +243,7 @@ class RF_Stage3_CycloAudit:
         tau_target: int,
         alpha_best_hz: float,
         delta_guard: int = 25,
-        n_side: int = 20,
+        n_side: int = 10,
         half_w: int = 200,
     ) -> float:
         """

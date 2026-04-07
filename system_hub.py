@@ -58,18 +58,6 @@ class CentralHubEngine(QObject):
         self._master_thread = None
         self._tick_lock     = threading.Lock()  # 防止 tick() 在 stop/start 切换时重入
 
-        # ── 时序持久化滤波器（Temporal Persistence Filter）──────────────────
-        # 原理：
-        #   单次 SMPS 瞬态可偶发通过 PSR+CFS 门限（1 tick 误报）
-        #   真实 OcuSync 信号持续传输，连续多个 tick 均会确认
-        # 实现：
-        #   _rf_confirm_streak  : 当前连续 S3 确认 tick 数
-        #   RF_CONFIRM_REQUIRED : 发出最终告警所需的连续确认数（默认 2）
-        # 延迟代价：增加 1 个检测周期（约 1~2 秒），对告警响应速度影响极小
-        self._rf_confirm_streak  = 0
-        self._rf_confirm_info    = {}   # 缓存最近一次有效告警信息
-        self.RF_CONFIRM_REQUIRED = 2    # 连续 2 tick 确认才入库报警
-
         # RF 与视觉通道的最新帧缓存（供多模态证据融合使用）
         self.cache_rf  = np.zeros((640, 640, 3),  dtype=np.uint8)
         self.cache_vis = np.zeros((640, 1137, 3), dtype=np.uint8)
@@ -90,17 +78,6 @@ class CentralHubEngine(QObject):
         self.signal_log.emit("采集管道启动：SDR 前端及视觉网络客户端已进入工作状态。")
         self._master_thread = threading.Thread(target=self._hub_loop, daemon=True)
         self._master_thread.start()
-        # 在 Linux/RK3588 上将检测线程绑定至 A76 大核（cpu4-7），
-        # Qt 主线程（监控 QTimer）自然运行在 A55 小核，双方不竞争同一核
-        try:
-            from ui_qt.orangepi_monitor import pin_thread_to_big_cores
-            # 需在线程启动后稍等片刻，确保 OS 已分配 tid
-            import time as _t; _t.sleep(0.05)
-            self._master_thread_pin = threading.Thread(
-                target=pin_thread_to_big_cores, daemon=True)
-            self._master_thread_pin.start()
-        except Exception:
-            pass
         
     def stop_sensing(self):
         self.running = False
@@ -147,38 +124,12 @@ class CentralHubEngine(QObject):
                 if rf_log.strip():
                     self.signal_log.emit(rf_log)
 
-                # ── 时序持久化滤波器 ────────────────────────────────────────
-                # 数学模型：
-                #   设每个 tick S3 的虚警概率为 P_fa_tick（单次）
-                #   N 次连续均虚警的概率：P_fa_final = P_fa_tick^N
-                #   N=2: P_fa_final = P_fa_tick²（大幅抑制偶发虚报）
-                #   对 OcuSync（P_detect_tick ≈ 0.95）：
-                #     P_detect_final = 1-(1-0.95^2) ≈ 90%  （2连续）
-                # ────────────────────────────────────────────────────────────
                 if rf_alert:
-                    self._rf_confirm_streak += 1
-                    self._rf_confirm_info    = rf_info   # 缓存当前告警信息
-                    streak = self._rf_confirm_streak
-                    self.signal_log.emit(
-                        f"[TPF] S3 确认 {streak}/{self.RF_CONFIRM_REQUIRED} tick "
-                        f"(freq={rf_info.get('freq_mhz',0):.0f}MHz "
-                        f"score={rf_info.get('score',0)*100:.1f}%)")
-
-                    if streak >= self.RF_CONFIRM_REQUIRED:
-                        # 连续确认达标 → 发出最终告警
-                        self.signal_system_status.emit(
-                            {"system": "[!] Alert: OcuSync RF Detected!", "color": "#e74c3c"})
-                        freq  = self._rf_confirm_info.get("freq_mhz", 0.0)
-                        score = self._rf_confirm_info.get("score",    0.0)
-                        self._trigger_composite_save("SDR_OMNI_TRIGGER", freq, score)
-                        # 不重置 streak，维持告警状态直到信号消失
+                    self.signal_system_status.emit({"system": "[!] Alert: OcuSync RF Detected!", "color": "#e74c3c"})
+                    freq = rf_info.get("freq_mhz", 0.0)
+                    score = rf_info.get("score", 0.0)
+                    self._trigger_composite_save("SDR_OMNI_TRIGGER", freq, score)
                 else:
-                    # S3 未通过：重置连续计数器
-                    if self._rf_confirm_streak > 0:
-                        self.signal_log.emit(
-                            f"[TPF] 连续确认中断（streak 重置: "
-                            f"{self._rf_confirm_streak} → 0）")
-                    self._rf_confirm_streak = 0
                     self.signal_system_status.emit({
                         "system": f"系统状态: [扫描] ({rf_info.get('freq_mhz', 0):.0f}MHz)" if rf_info else "系统状态: 主管道全速扫描中...",
                         "color": "#27ae60"

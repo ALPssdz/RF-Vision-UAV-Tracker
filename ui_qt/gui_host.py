@@ -507,8 +507,7 @@ class MainWindow(QMainWindow):
     def __init__(self, hub=None):
         super().__init__()
         self.setWindowTitle("RF-Vision  ·  无人机多模态探测系统  v2.0")
-        self.resize(1600, 960)
-        self.setMinimumSize(1024, 700)   # 最小可用分辨率下限
+        self.resize(1680, 980)
         self.setStyleSheet(GLOBAL_STYLESHEET)
 
         self.hub = hub
@@ -674,9 +673,7 @@ class MainWindow(QMainWindow):
         content = QHBoxLayout()
         content.setSpacing(12)
 
-        # ── 左列：RF 瀑布图 ─────────────────────────────────────────
-        # 不再 setFixedSize：改用 setScaledContents + AspectRatioMode
-        # 让图像随卡片弹性缩放，不撑破布局
+        # 左列：RF 瀑布图
         left_col = QVBoxLayout()
         left_col.setSpacing(8)
 
@@ -690,16 +687,13 @@ class MainWindow(QMainWindow):
         rf_card_lay.addWidget(rf_hdr)
 
         self.img_rf = QLabel()
-        # 去掉 setFixedSize；改为弹性大小策略
-        self.img_rf.setMinimumSize(320, 320)         # 最小可用尺寸
-        self.img_rf.setMaximumSize(640, 600)         # 水平 640，垂直 600（皅1080p+任务栏留足够垃直裕度）
-        self.img_rf.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.img_rf.setFixedSize(580, 580)
         self.img_rf.setAlignment(Qt.AlignCenter)
         self.img_rf.setStyleSheet("background-color: #010205; border-radius: 0 0 12px 12px;")
-        rf_card_lay.addWidget(self.img_rf, stretch=1)
-        left_col.addWidget(rf_card, stretch=1)
+        rf_card_lay.addWidget(self.img_rf)
+        left_col.addWidget(rf_card)
 
-        # ── 中列：K230 视频 ─────────────────────────────────────────
+        # 中列：K230 视频
         mid_col = QVBoxLayout()
         mid_col.setSpacing(8)
 
@@ -712,35 +706,29 @@ class MainWindow(QMainWindow):
         k230_card_lay.addWidget(k230_hdr)
 
         self.img_k230 = QLabel()
-        # 去掉 setMinimumSize(640, 480) 硬下限；改为柔性策略
-        self.img_k230.setMinimumSize(240, 180)       # 真正的最小可用尺寸
+        self.img_k230.setMinimumSize(640, 480)
         self.img_k230.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.img_k230.setAlignment(Qt.AlignCenter)
         self.img_k230.setStyleSheet("background-color: #010205; border-radius: 0 0 12px 12px;")
         k230_card_lay.addWidget(self.img_k230, stretch=1)
         mid_col.addWidget(k230_card, stretch=1)
 
-        # ── 右列：香橙派系统监控面板 + 控制按钮 ────────────────────
+        # 右列：香橙派系统监控面板 + 控制按钮
         right_col = QVBoxLayout()
         right_col.setSpacing(10)
         right_col.addWidget(self._build_opi_monitor_panel())
         right_col.addWidget(self._build_control_panel())
         right_col.addStretch()
 
-        # stretch 分配：左=3  中=5  右=2（总 10 份）
-        # 右列固定最大宽度由 panel 内部 setMaximumWidth 保证，不影响弹性
-        content.addLayout(left_col,  stretch=3)
-        content.addLayout(mid_col,   stretch=5)
-        content.addLayout(right_col, stretch=2)
+        content.addLayout(left_col)
+        content.addLayout(mid_col, stretch=1)
+        content.addLayout(right_col)
         root.addLayout(content, stretch=1)
 
         # ── 底部日志区 ─────────────────────────────────────────────────
         log_card = QFrame()
         log_card.setObjectName("card")
-        # 原来 setFixedHeight(180) 占用固定 180px
-        # 改为弹性：最小 120px，随窗口高度适度展开
-        # 这样 1080p 有任务栏时日志区不会被压缩成 0高度
-        log_card.setMinimumHeight(120)
+        log_card.setFixedHeight(180)
         log_card_lay = QVBoxLayout(log_card)
         log_card_lay.setContentsMargins(0, 0, 0, 0)
 
@@ -751,8 +739,7 @@ class MainWindow(QMainWindow):
         self.log_textbox.setReadOnly(True)
         log_card_lay.addWidget(self.log_textbox, stretch=1)
 
-        # 日志区 stretch=0：不与 content 内容争抢空间；但允许在剩余空间足够时适度长大
-        root.addWidget(log_card, stretch=1)
+        root.addWidget(log_card)
 
     def _make_card_header(self, title: str, accent: str) -> QFrame:
         """创建统一样式的卡片标题头部。"""
@@ -793,10 +780,8 @@ class MainWindow(QMainWindow):
         """
         panel = QFrame()
         panel.setObjectName("card")
-        # 用 setMaximumWidth 代替 setFixedWidth，允许在小屏下收缩
-        panel.setMinimumWidth(200)
-        panel.setMaximumWidth(300)
-        panel.setMinimumHeight(300)
+        panel.setFixedWidth(260)
+        panel.setMinimumHeight(340)
         lay = QVBoxLayout(panel)
         lay.setContentsMargins(0, 0, 0, 12)
         lay.setSpacing(10)
@@ -867,8 +852,7 @@ class MainWindow(QMainWindow):
         """构建启动/停止控制面板。"""
         panel = QFrame()
         panel.setObjectName("card")
-        panel.setMinimumWidth(200)
-        panel.setMaximumWidth(300)
+        panel.setFixedWidth(260)
         lay = QVBoxLayout(panel)
         lay.setContentsMargins(0, 0, 0, 14)
         lay.setSpacing(10)
@@ -933,12 +917,10 @@ class MainWindow(QMainWindow):
         content = QHBoxLayout()
         content.setSpacing(10)
 
-        # 表格（Tab2：告警日志库）
+        # 表格
         table_card = QFrame()
         table_card.setObjectName("card")
-        # 去掉 setFixedWidth(420)，改用弹性宽度
-        table_card.setMinimumWidth(280)
-        table_card.setMaximumWidth(480)
+        table_card.setFixedWidth(420)
         t_lay = QVBoxLayout(table_card)
         t_lay.setContentsMargins(0, 0, 0, 0)
 

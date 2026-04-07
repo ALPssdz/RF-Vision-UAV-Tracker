@@ -69,7 +69,7 @@ def _generate_test_frame(t: float, alert: bool, conf: float, bbox: list) -> np.n
     # 网格线（模拟摄像机场景结构）
     for x in range(0, 1280, 160):
         cv2.line(frame, (x, 0), (x, 720), (40, 40, 40), 1)
-    for y in range(0, 720, 90): 
+    for y in range(0, 720, 90):
         cv2.line(frame, (0, y), (1280, y), (40, 40, 40), 1)
 
     # 状态标注
