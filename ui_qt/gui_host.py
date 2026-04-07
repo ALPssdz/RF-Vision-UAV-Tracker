@@ -161,8 +161,6 @@ QHeaderView::section {{
     padding: 8px 12px;
     border: none;
     border-right: 1px solid {PALETTE['border']};
-    letter-spacing: 0.5px;
-    text-transform: uppercase;
 }}
 QHeaderView::section:first {{ border-left: none; border-radius: 8px 0 0 0; }}
 QHeaderView::section:last {{ border-right: none; border-radius: 0 8px 0 0; }}
@@ -399,7 +397,7 @@ class NetSpeedCard(QFrame):
         # 标签行
         title_row = QHBoxLayout()
         lbl_dir = QLabel(label)
-        lbl_dir.setStyleSheet(f"color: {PALETTE['text_secondary']}; font-size: 11px; font-weight: 600; letter-spacing: 0.5px;")
+        lbl_dir.setStyleSheet(f"color: {PALETTE['text_secondary']}; font-size: 11px; font-weight: 600;")
         self._lbl_val = QLabel("0  KB/s")
         self._lbl_val.setStyleSheet(f"color: {color}; font-size: 16px; font-weight: 700;")
         self._lbl_val.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
@@ -466,7 +464,7 @@ class StatusBannerCard(QFrame):
         text_col = QVBoxLayout()
         text_col.setSpacing(0)
         self._lbl_icon = QLabel(icon)
-        self._lbl_icon.setStyleSheet(f"color: {PALETTE['text_muted']}; font-size: 10px; font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase;")
+        self._lbl_icon.setStyleSheet(f"color: {PALETTE['text_muted']}; font-size: 10px; font-weight: 600;")
         self._lbl_status = QLabel(title)
         self._lbl_status.setStyleSheet(f"color: {PALETTE['text_primary']}; font-size: 12px; font-weight: 600;")
         text_col.addWidget(self._lbl_icon)
@@ -539,12 +537,12 @@ class MainWindow(QMainWindow):
         # Tab 1：实时监测数据流
         self.tab1 = QWidget()
         self.setup_live_dashboard()
-        self.tabs.addTab(self.tab1, "  📡  监测数据流")
+        self.tabs.addTab(self.tab1, "  ◈  监测数据流")
 
         # Tab 2：告警日志库
         self.tab2 = QWidget()
         self.setup_evidence_database()
-        self.tabs.addTab(self.tab2, "  🗂  告警日志库")
+        self.tabs.addTab(self.tab2, "  ▦  告警日志库")
 
         self.tabs.currentChanged.connect(self.on_tab_changed)
 
@@ -632,12 +630,11 @@ class MainWindow(QMainWindow):
         lay.setContentsMargins(20, 0, 20, 0)
 
         # 左侧：系统名称
-        lbl_brand = QLabel("⚡ RF-Vision")
+        lbl_brand = QLabel("RF-Vision")
         lbl_brand.setStyleSheet(f"""
             color: {PALETTE['accent_blue']};
             font-size: 18px;
             font-weight: 800;
-            letter-spacing: 1px;
         """)
         glow = QGraphicsDropShadowEffect()
         glow.setBlurRadius(20)
@@ -696,7 +693,7 @@ class MainWindow(QMainWindow):
         rf_card_lay.setContentsMargins(0, 0, 0, 0)
         rf_card_lay.setSpacing(0)
 
-        rf_hdr = self._make_card_header("📊 SDR 射频瀑布图", PALETTE['accent_blue'])
+        rf_hdr = self._make_card_header("▤  SDR 射频瀑布图", PALETTE['accent_blue'])
         rf_card_lay.addWidget(rf_hdr)
 
         self.img_rf = QLabel()
@@ -715,7 +712,7 @@ class MainWindow(QMainWindow):
         k230_card_lay = QVBoxLayout(k230_card)
         k230_card_lay.setContentsMargins(0, 0, 0, 0)
 
-        k230_hdr = self._make_card_header("🎥 K230 光电视觉推流", PALETTE['accent_amber'])
+        k230_hdr = self._make_card_header("◉  K230 光电视觉推流", PALETTE['accent_amber'])
         k230_card_lay.addWidget(k230_hdr)
 
         self.img_k230 = QLabel()
@@ -745,7 +742,7 @@ class MainWindow(QMainWindow):
         log_card_lay = QVBoxLayout(log_card)
         log_card_lay.setContentsMargins(0, 0, 0, 0)
 
-        log_hdr = self._make_card_header("💬 系统事件日志", PALETTE['accent_green'])
+        log_hdr = self._make_card_header("▸  系统事件日志", PALETTE['accent_green'])
         log_card_lay.addWidget(log_hdr)
 
         self.log_textbox = QPlainTextEdit()
@@ -769,7 +766,7 @@ class MainWindow(QMainWindow):
         lay = QHBoxLayout(hdr)
         lay.setContentsMargins(14, 0, 14, 0)
         lbl = QLabel(title)
-        lbl.setStyleSheet(f"color: {accent}; font-size: 13px; font-weight: 700; letter-spacing: 0.3px; background: transparent; border: none;")
+        lbl.setStyleSheet(f"color: {accent}; font-size: 13px; font-weight: 700; background: transparent; border: none;")
         lay.addWidget(lbl)
         lay.addStretch()
         return hdr
@@ -800,7 +797,7 @@ class MainWindow(QMainWindow):
         lay.setSpacing(10)
 
         # 标题头
-        hdr = self._make_card_header("🖥  香橙派 RK3588 监控", PALETTE['accent_purple'])
+        hdr = self._make_card_header("▣  香橙派 RK3588 监控", PALETTE['accent_purple'])
         lay.addWidget(hdr)
 
         # 在线状态行
@@ -844,8 +841,8 @@ class MainWindow(QMainWindow):
         lay.addWidget(sep)
 
         # 网络速度标题
-        net_hdr = QLabel("  🌐 网络吞吐量")
-        net_hdr.setStyleSheet(f"color: {PALETTE['text_secondary']}; font-size: 11px; font-weight: 600; letter-spacing: 0.3px;")
+        net_hdr = QLabel("  ⊕  网络吞吐量")
+        net_hdr.setStyleSheet(f"color: {PALETTE['text_secondary']}; font-size: 11px; font-weight: 600;")
         lay.addWidget(net_hdr)
 
         # 网速卡片
@@ -870,7 +867,7 @@ class MainWindow(QMainWindow):
         lay.setContentsMargins(0, 0, 0, 14)
         lay.setSpacing(10)
 
-        hdr = self._make_card_header("⚙  采集控制", PALETTE['accent_green'])
+        hdr = self._make_card_header("◎  采集控制", PALETTE['accent_green'])
         lay.addWidget(hdr)
 
         btns = QVBoxLayout()
@@ -882,7 +879,7 @@ class MainWindow(QMainWindow):
         self.btn_play.setMinimumHeight(48)
         self.btn_play.clicked.connect(self.toggle_play)
 
-        self.btn_exit = QPushButton("⏏  安全终止进程组")
+        self.btn_exit = QPushButton("■  安全终止进程组")
         self.btn_exit.setObjectName("btn_secondary")
         self.btn_exit.setMinimumHeight(38)
         self.btn_exit.clicked.connect(self.close)
@@ -908,10 +905,10 @@ class MainWindow(QMainWindow):
         tb_lay = QHBoxLayout(toolbar_card)
         tb_lay.setContentsMargins(14, 0, 14, 0)
 
-        lbl_tb = QLabel("🗂  告警证据数据库")
+        lbl_tb = QLabel("▦  告警证据数据库")
         lbl_tb.setStyleSheet(f"color: {PALETTE['text_primary']}; font-size: 14px; font-weight: 700;")
 
-        self.btn_clear_db = QPushButton("🗑  清除全部记录")
+        self.btn_clear_db = QPushButton("✕  清除全部记录")
         self.btn_clear_db.setObjectName("btn_danger")
         self.btn_clear_db.setMaximumWidth(180)
         self.btn_clear_db.setFixedHeight(36)
@@ -937,7 +934,7 @@ class MainWindow(QMainWindow):
         t_lay = QVBoxLayout(table_card)
         t_lay.setContentsMargins(0, 0, 0, 0)
 
-        t_hdr = self._make_card_header("📋 事件列表", PALETTE['accent_blue'])
+        t_hdr = self._make_card_header("▤  事件列表", PALETTE['accent_blue'])
         t_lay.addWidget(t_hdr)
 
         self.db_table = QTableWidget()
@@ -966,7 +963,7 @@ class MainWindow(QMainWindow):
         img_card_lay = QVBoxLayout(img_card)
         img_card_lay.setContentsMargins(0, 0, 0, 0)
 
-        img_hdr = self._make_card_header("🖼  证据图像预览", PALETTE['accent_amber'])
+        img_hdr = self._make_card_header("▢  证据图像预览", PALETTE['accent_amber'])
         img_card_lay.addWidget(img_hdr)
 
         self.db_img_label = QLabel("请选择告警记录以显示关联的多模态证据图像")
@@ -995,7 +992,7 @@ class MainWindow(QMainWindow):
         if "vision" in status_dict:
             self._card_vision.update_status(status_dict["vision"])
         if "system" in status_dict:
-            active = "⚠" in status_dict["system"] or "🟢" in status_dict["system"]
+            active = "△" in status_dict["system"] or "●" in status_dict["system"]
             color = status_dict.get("color", PALETTE['accent_cyan'])
             self._card_system.update_status(status_dict["system"], active=active, color=color)
 
@@ -1022,7 +1019,7 @@ class MainWindow(QMainWindow):
             self.btn_play.setStyle(self.btn_play.style())
         else:
             self.hub.start_sensing()
-            self.btn_play.setText("⏸  停止采集管道")
+            self.btn_play.setText("||  停止采集管道")
             self.btn_play.setObjectName("btn_stop")
             self.btn_play.setStyleSheet("")
             self.btn_play.setStyle(self.btn_play.style())
@@ -1076,7 +1073,7 @@ class MainWindow(QMainWindow):
         if cv_img is not None:
             self.render_cv2_to_qlabel(cv_img, self.db_img_label)
         else:
-            self.db_img_label.setText("⚠  I/O 错误：图像文件寻址失败 —— 文件可能已被移动或删除。")
+            self.db_img_label.setText("△  I/O 错误：图像文件寻址失败 —— 文件可能已被移动或删除。")
 
     def render_cv2_to_qlabel(self, cv_img, qlabel: QLabel):
         qlabel.clear()
@@ -1108,7 +1105,7 @@ class MainWindow(QMainWindow):
     def _refresh_clock(self):
         self.statusBar().showMessage(
             f"RF-Vision v2.0  ·  {time.strftime('%Y-%m-%d  %H:%M:%S')}"
-            f"  ·  香橙派 SSH 监控已启用"
+            f"  ·  香橙派本地监控已启用"
         )
 
     # ==================================================================

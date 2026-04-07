@@ -92,8 +92,6 @@ QGroupBox::title {
     color: #4f8ef7;
     font-weight: 700;
     font-size: 11px;
-    letter-spacing: 1.2px;
-    text-transform: uppercase;
 }
 
 /* ── 下拉框 ──────────────────────────────────────────────── */

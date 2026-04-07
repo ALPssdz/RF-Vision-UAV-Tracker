@@ -70,10 +70,10 @@ class CentralHubEngine(QObject):
         if self.running: return
         self.running = True
         self.signal_system_status.emit({
-            "system": "系统状态: 🟢 主管道全速轮询中...", 
+            "system": "[ACTIVE] 主管道全速轮询中...", 
             "color": "#27ae60",
-            "sdr": "SDR 节点: 🔄 IQ 数据采集中",
-            "vision": "视频节点: 🔄 画面及信令监听中"
+            "sdr": "SDR 节点: [RX] IQ 数据采集中",
+            "vision": "视频节点: [RX] 画面及信令监听中"
         })
         self.signal_log.emit("采集管道启动：SDR 前端及视觉网络客户端已进入工作状态。")
         self._master_thread = threading.Thread(target=self._hub_loop, daemon=True)
@@ -81,7 +81,7 @@ class CentralHubEngine(QObject):
         
     def stop_sensing(self):
         self.running = False
-        self.signal_system_status.emit({"system": "系统模式: 🟡 任务挂起", "color": "#f1c40f"})
+        self.signal_system_status.emit({"system": "系统模式: [挂起] 任务挂起", "color": "#f1c40f"})
         self.signal_log.emit("系统中央主循环进程已安全退出执行。")
         
 
@@ -125,13 +125,13 @@ class CentralHubEngine(QObject):
                     self.signal_log.emit(rf_log)
 
                 if rf_alert:
-                    self.signal_system_status.emit({"system": "⚠️ Alert: OcuSync RF Detected!", "color": "#e74c3c"})
+                    self.signal_system_status.emit({"system": "[!] Alert: OcuSync RF Detected!", "color": "#e74c3c"})
                     freq = rf_info.get("freq_mhz", 0.0)
                     score = rf_info.get("score", 0.0)
                     self._trigger_composite_save("SDR_OMNI_TRIGGER", freq, score)
                 else:
                     self.signal_system_status.emit({
-                        "system": f"系统状态: 🟢 扫描中 ({rf_info.get('freq_mhz', 0):.0f}MHz)" if rf_info else "系统状态: 🟢 主管道全速扫描中...",
+                        "system": f"系统状态: [扫描] ({rf_info.get('freq_mhz', 0):.0f}MHz)" if rf_info else "系统状态: 主管道全速扫描中...",
                         "color": "#27ae60"
                     })
             except Exception as e:
