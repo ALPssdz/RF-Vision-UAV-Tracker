@@ -511,7 +511,9 @@ class MainWindow(QMainWindow):
         self.setStyleSheet(GLOBAL_STYLESHEET)
 
         self.hub = hub
-        self.db_engine = DBManager()   # 仅只读挂载点
+        # 使用 hub 中唯一的 DBManager 实例（WAL 模式下读写并发安全）
+        # 禁止在此处创建新的 DBManager()，否则会产生双连接并发冲突
+        self.db_engine = hub.db_engine if hub is not None else None
 
         # 构建中央控件
         central = QWidget()
