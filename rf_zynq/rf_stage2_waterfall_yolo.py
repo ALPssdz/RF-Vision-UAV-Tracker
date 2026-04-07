@@ -33,15 +33,13 @@ class RF_Stage2_Dwell:
         self.hop_size      = self.fft_size // 2   # 50% 重叠，hop = 1024
 
         # Blackman 窗：第一旁瓣 -58 dB，适合抑制 OFDM 宽带旁瓣
-        # coherent_gain = sum(window) / fft_size ≈ 0.42（归一化补偿用）
-        self.window        = np.blackman(self.fft_size).astype(np.float32)
-        self._win_gain     = float(np.sum(self.window))  # 用于 dBFS 归一化
+        self.window    = np.blackman(self.fft_size).astype(np.float32)
 
-        # 功率映射范围（dBFS，相对于满量程单音信号的 FFT bin 峰值）
-        # Blackman 窗归一化后，满量程正弦信号的单 bin dBFS ≈ +0 dBFS
-        # 实际 OcuSync 信号（多子载波分散功率）通常在 -30~-10 dBFS 范围
-        self.vmin = -70   # 噪声底
-        self.vmax =   0   # 满量程单音归一化后的上限
+        # 功率映射范围（dBFS，未归一化的原始 FFT 幅度对数）
+        # N=2048 Blackman vs N=4096 Blackman：噪声底前者低约 3 dB（sqrt(2)）
+        # vmin 从 -60 小幅提升至 -63、vmax 从 +30 调至 +27 补偿该差异
+        self.vmin = -63
+        self.vmax =  27
 
     def generate_waterfall_tensor(self, center_freq: float) -> np.ndarray:
         """
@@ -102,15 +100,14 @@ class RF_Stage2_Dwell:
                             dtype=np.complex64)
 
         # 施加 Blackman 窗并执行批量 FFT
-        # 除以 _win_gain 归一化到 dBFS（使满量程单音在峰值 bin 对应 0 dBFS）
+        # 不除以 _win_gain：保持原始 FFT 幅度尺度（与 vmin/vmax 校准值匹配）
+        # （除以 _win_gain 会将幅度压低 59 dB，导致大多数信号落在 vmin 之下，图像全黑）
         windowed  = frames * self.window
         fft_data  = np.fft.fftshift(
             np.fft.fft(windowed, axis=1), axes=1
-        ) / self._win_gain
+        )    # 不除以 _win_gain
 
-        # 幅度谱（dBFS）
-        # power_db[i, k] = 20*log10(|FFT[i,k]| / win_gain)
-        # 等价于功率谱密度（PSD）的单边 dBFS 表示
+        # 幅度谱（dBFS，未归一化）
         power_db  = 20.0 * np.log10(np.abs(fft_data).astype(np.float32) + 1e-12)
 
         # ── 频域降采样：线性功率均值池化 ──────────────────────────────────────

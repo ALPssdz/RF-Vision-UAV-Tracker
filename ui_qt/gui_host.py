@@ -689,11 +689,12 @@ class MainWindow(QMainWindow):
         rf_card_lay.addWidget(rf_hdr)
 
         self.img_rf = QLabel()
-        self.img_rf.setFixedSize(580, 580)
+        self.img_rf.setMinimumSize(420, 420)   # 最小尺寸保登
+        self.img_rf.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.img_rf.setAlignment(Qt.AlignCenter)
         self.img_rf.setStyleSheet("background-color: #010205; border-radius: 0 0 12px 12px;")
-        rf_card_lay.addWidget(self.img_rf)
-        left_col.addWidget(rf_card)
+        rf_card_lay.addWidget(self.img_rf, stretch=1)
+        left_col.addWidget(rf_card, stretch=1)
 
         # 中列：K230 视频
         mid_col = QVBoxLayout()
@@ -722,8 +723,10 @@ class MainWindow(QMainWindow):
         right_col.addWidget(self._build_control_panel())
         right_col.addStretch()
 
-        content.addLayout(left_col)
-        content.addLayout(mid_col, stretch=1)
+        # 三列 stretch 比例：RF 列 : K230 列 : 右侧控制列 = 3 : 4 : 固定260
+        # 在 1080P 全屏（1920宽）：RF列约 660px、K230列约 880px、右列 280px
+        content.addLayout(left_col, stretch=3)
+        content.addLayout(mid_col,  stretch=4)
         content.addLayout(right_col)
         root.addLayout(content, stretch=1)
 
@@ -1076,18 +1079,20 @@ class MainWindow(QMainWindow):
 
         if len(cv_img.shape) == 3:
             h, w, ch = cv_img.shape
-            # 保持宽高比缩放至目标区域
             scale = min(target_w / w, target_h / h)
-            nw, nh = int(w * scale), int(h * scale)
+            nw, nh = max(1, int(w * scale)), max(1, int(h * scale))
             resized = cv2.resize(cv_img, (nw, nh), interpolation=cv2.INTER_AREA)
             rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
-            qt_img = QImage(rgb.data, nw, nh, nw * 3, QImage.Format_RGB888)
+            # 深拷贝避免高帧率下 numpy 数据指针失效导致崩溃
+            rgb_copy = rgb.copy()
+            qt_img = QImage(rgb_copy.data, nw, nh, nw * 3, QImage.Format_RGB888)
         else:
             h, w = cv_img.shape
             scale = min(target_w / w, target_h / h)
-            nw, nh = int(w * scale), int(h * scale)
-            resized = cv2.resize(cv_img, (nw, nh))
-            qt_img = QImage(resized.data, nw, nh, nw, QImage.Format_Grayscale8)
+            nw, nh = max(1, int(w * scale)), max(1, int(h * scale))
+            resized  = cv2.resize(cv_img, (nw, nh))
+            gray_copy = resized.copy()
+            qt_img = QImage(gray_copy.data, nw, nh, nw, QImage.Format_Grayscale8)
 
         qlabel.setPixmap(QPixmap.fromImage(qt_img))
 
