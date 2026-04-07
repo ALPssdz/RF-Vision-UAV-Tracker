@@ -75,6 +75,11 @@ QMainWindow, QWidget {
     font-size: 13px;
 }
 
+/* ── QLabel 透明背景（Linux Qt5 兼容）──────────────────────── */
+QLabel {
+    background-color: transparent;
+}
+
 /* ── 分组框 ──────────────────────────────────────────────── */
 QGroupBox {
     border: 1px solid #1e2843;

@@ -68,6 +68,13 @@ QMainWindow, QWidget {{
     font-size: 13px;
 }}
 
+/* ── QLabel 透明背景（Linux Qt5 兼容）────────────────────────────────── */
+/* 父容器使用 stylesheet 后，Linux Qt5 会给子 QLabel 分配不透明系统背景，   */
+/* 显式声明 transparent 消除黑色底框渲染问题。                              */
+QLabel {{
+    background-color: transparent;
+}}
+
 /* ── 选项卡栏 ─────────────────────────────────────────────────────────── */
 QTabWidget::pane {{
     background-color: {PALETTE['bg_card']};
