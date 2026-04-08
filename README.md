@@ -5,7 +5,7 @@
 ## Table of Contents
 - [1. Introduction](#1-introduction)
 - [2. System Architecture](#2-system-architecture)
-- [3. Three-Stage RF Detection Pipeline](#3-three-stage-rf-detection-pipeline)
+- [3. Three-Stage RF Detection Pipeline (v4.0)](#3-three-stage-rf-detection-pipeline-v40)
 - [4. S3 Autonomous Field Calibration](#4-s3-autonomous-field-calibration)
 - [5. Asymmetric Fusion Methodology](#5-asymmetric-fusion-methodology)
 - [6. Software Stack & Module Organization](#6-software-stack--module-organization)
@@ -29,42 +29,69 @@ The hardware topology is established upon a Gigabit Ethernet LAN, interconnectin
 *   **Central Controller (Orange Pi 5 — RK3588)**
     Global event bus and aggregation hub. Executes the three-stage RF detection pipeline, runs YOLOv8 spectrogram inference on the RK3588 NPU via RKNN-Toolkit-Lite2, fuses multi-modal evidence, and serves a PyQt5 GUI with real-time visualization and SQLite3 alert persistence.
 
-## 3. Three-Stage RF Detection Pipeline
+## 3. Three-Stage RF Detection Pipeline (v4.0)
 
 ```
 IQ Samples (AD9364, 40 MSps, 2.62M samples/burst)
         │
         ▼
-  Stage 1 — RSSI Pre-scan (S1)
+  Stage 1 — Kurtosis-Weighted RSSI Pre-scan (S1)  [v4.0]
     Fast power measurement across all 5.8 GHz sectors.
-    EMA-weighted priority ranking selects the dominant frequency band.
+    Kurtosis-weighted priority ranking:
+      P̃_f = P̄_f · (1 + β·(κ_f − 3)/3),  β = 0.40
+    OcuSync burst frames (κ ≈ 6~8 vs. noise κ ≈ 3) are amplified
+    by 40~80% in the sector score, ensuring weak-burst sectors are
+    selected for deep analysis even at low average power.
+    Buffer: 524,288 samples (13.1 ms); 3-frame median filtering.
         │
         ▼
   Stage 2 — Spectrogram + YOLOv8 (S2)
     STFT waterfall image (640×640, HOT colormap).
     YOLOv8n inference on RK3588 NPU via RKNN (~30 ms).
+    bbox_score forwarded to alert_info for optional SDS injection.
+    [Note: YOLO assist injection is OFF by default until the model
+     is retrained on 5.8 GHz waterfall data. See config.py.]
         │
         ▼
-  Stage 3 — Cyclic Frequency Discriminator (S3)  [v3.0]
-    Cyclic Autocorrelation Function (CAF) with FFT-accelerated α-scan.
-    Exploits the orthogonality of OFDM cycle frequencies to achieve
-    protocol-level separation between OcuSync and Wi-Fi — even when
-    Wi-Fi is 20 dB stronger than the UAV signal.
+  Stage 3 — Cyclic Frequency Discriminator v4.0 (S3)
+    Four-Layer Triple Orthogonal Verification + Soft Decision Scoring.
+
+    CAF-FFT core (inherited):
+      z[n] = x[n]·x*[n-τ],  NCC[α] = |FFT(z)[k]| / (N_z · P_x)
+      Wi-Fi leakage into OcuSync channel (N=160 000):
+        NCC_WiFi ≈ P_WiFi · sinc(1130) ≈ 0.028% of Wi-Fi power
 
     Target cycle frequencies (Fs = 40 MSps):
-      OcuSync 2.0 (Δf=15 kHz, τ=2667):     α_sym ≈ 12–14 kHz
-      OcuSync 3.0/4.0 (Δf=30 kHz, τ=1333): α_sym ≈ 22–28 kHz
+      OcuSync 2.0  (Δf=15 kHz, τ=2667):     α_sym ≈ 10.5–14.5 kHz
+      OcuSync 3.0/4.0 (Δf=30 kHz, τ=1333): α_sym ≈ 22–30 kHz
       Wi-Fi 802.11 (Δf=312.5 kHz, τ=128):  α_sym = 250 kHz  ← orthogonal
 
-    Wi-Fi leakage into OcuSync channel (N=200 000, Fs=40 MHz):
-      NCC_WiFi ≈ P_WiFi · sinc(1130) ≈ 0.028% of Wi-Fi power
+    v4.0 Decision Engine — Soft Decision Scoring (SDS):
+      S = 0.45·(NCC/th) + 0.25·log₁₀(PSR/th_PSR)
+        + 0.20·log₁₀(CFS/th_CFS) + 0.10·I[AFS_pass]
+      DETECT if S ≥ 1.0  AND  NCC ≥ 0.80×th  (soft floor)
+      BYPASS if NCC ≥ 2.5×th  (strong signal, no SDS required)
 
-    Four-stage decision funnel:
-      L1 — Frame-level CAF peak extraction (75% overlap, 200k-sample frames)
-      L2 — Combined statistic (peak×0.50 + avg×0.50) > per-sector adaptive threshold
-      L3 — τ-domain PSR (Peak-to-Sidelobe Ratio) ≥ 2.5×
-      L4 — α-domain CFS (Cyclic Frequency Sharpness) ≥ 1.8×
+    Four orthogonal verification layers:
+      L1 — Frame CAF-FFT  (CHUNK=160k, OVERLAP=80%, PEAK_WEIGHT=0.65)
+      L2 — Combined statistic > per-sector adaptive threshold
+      L3 — τ-domain PSR (Peak-to-Sidelobe Ratio) ≥ 2.2×
+      L4 — α-domain CFS (Cyclic Frequency Sharpness) ≥ 2.0×
+      AFS — Alpha Frequency Stability: σ_α < 500 Hz across frames
+            (OcuSync TCXO drift <500 Hz vs. SMPS/Wi-Fi jitter ~2–5 kHz)
 ```
+
+### False-Alarm Rate Model (v4.0)
+
+| Branch | TPF N | P_fa (final) |
+|--------|-------|-------------|
+| Strong bypass (NCC ≥ 3×th) | 1 | < 0.10% (AFS+PSR+CFS) |
+| Medium  (1.8×th ≤ NCC < 3×th) | 2 | ≈ 0.25% |
+| Weak    (th ≤ NCC < 1.8×th) | 3 | ≈ 0.013% |
+
+The Tri-Level Elastic TPF also uses **streak decay** instead of hard reset:
+`streak[t+1] = max(0, streak[t] − 0.5)` — signals that briefly drop below
+threshold recover their confirmation count within 2 ticks, reducing re-acquisition delay.
 
 ## 4. S3 Autonomous Field Calibration
 
@@ -81,9 +108,9 @@ th     = max(HARD_FLOOR, bg_eff × NOISE_MARGIN) (per-sector, independent)
 
 | Parameter | Value | Rationale |
 |-----------|-------|-----------|
-| `NOISE_MARGIN` | 2.0× | PSR + CFS funnel provides the primary false-alarm guard |
+| `NOISE_MARGIN` | 2.0× | SDS funnel (PSR+CFS+AFS) provides primary false-alarm guard |
 | `BG_MAX_WEIGHT` | 0.40 | Reduces single-burst SMPS spike influence |
-| `HARD_FLOOR_30K` | 1.8% | 8× theoretical NCC floor (1/√200 000 ≈ 0.22%) |
+| `HARD_FLOOR_30K` | 1.8% | 8× theoretical NCC floor (1/√160 000 ≈ 0.25%) |
 | `HARD_FLOOR_15K` | 1.4% | 6× theoretical NCC floor |
 | `ALPHA_SCAN_30K` | 22–30 kHz | Covers OcuSync CP variants (CP=1/8 → 26.7 kHz, CP=1/4 → 24.0 kHz) |
 | `ALPHA_SCAN_15K` | 10.5–14.5 kHz | Covers OcuSync 15 kHz channel variants |
@@ -106,10 +133,11 @@ Calibrated thresholds are written to `rf_zynq/s3_thresholds.json` (git-ignored) 
 ## 5. Asymmetric Fusion Methodology
 Differing from conventional Boolean AND-logic fusion, this system implements independent, asynchronous trigger paths to maximize detection recall:
 
-1.  **RF Trigger (Primary)** — S3 CAF-FFT discriminator confirms OcuSync protocol fingerprint and fires an alert with a cyclic spectrum snapshot.
+1.  **RF Trigger (Primary)** — S3 SDS discriminator confirms OcuSync protocol fingerprint through four orthogonal verifications and fires an alert with a cyclic spectrum snapshot.
 2.  **Visual Trigger (Secondary)** — K230 UDP telemetry independently triggers an alert, compensating for UAVs under RF silence or traversing the antenna null.
+3.  **YOLO Assist (Optional, disabled by default)** — Once retrained on 5.8 GHz waterfall data (`YOLO_ASSIST_ENABLED = True` in config.py), S2 bbox_score injects +0.15 into the SDS score for weak-signal rescue when S3 SDS ∈ [0.85, 1.00).
 
-Both trigger paths produce a fused composite evidence image (RF waterfall + optical frame) stored in the SQLite3 alert database.
+Both primary trigger paths produce a fused composite evidence image (RF waterfall + optical frame) stored in the SQLite3 alert database.
 
 ## 6. Software Stack & Module Organization
 
@@ -117,12 +145,12 @@ Both trigger paths produce a fused composite evidence image (RF waterfall + opti
 RF-Vision-UAV-Tracker/
 ├── system_hub.py                    # Entry point & central pipeline orchestrator
 ├── backend_rk3588/
-│   ├── config.py                    # Centralized hardware configuration (gain, URI, sectors)
-│   └── main_rf_pipeline.py          # RFToolchain: S1→S2→S3 pipeline controller
+│   ├── config.py                    # Centralized hardware config + YOLO_ASSIST_ENABLED flag
+│   └── main_rf_pipeline.py          # RFToolchain: S1→S2→S3 pipeline controller (v4.0)
 ├── rf_zynq/
-│   ├── rf_stage1_rssi_scan.py       # S1: EMA-weighted fast RSSI frequency scan
+│   ├── rf_stage1_rssi_scan.py       # S1: Kurtosis-weighted fast RSSI scan (v4.0)
 │   ├── rf_stage2_waterfall_yolo.py  # S2: IQ → STFT waterfall tensor
-│   ├── rf_stage3_cyclostationary.py # S3: CAF-FFT cyclic frequency discriminator
+│   ├── rf_stage3_cyclostationary.py # S3: CAF-FFT + AFS + SDS discriminator (v4.0)
 │   ├── calibrate_s3.py              # S3 autonomous field calibration wizard
 │   ├── s3_thresholds.json           # Runtime thresholds (git-ignored, auto-generated)
 │   └── rknn_infer.py                # RKNN-Lite2 YOLOv8 NPU inference wrapper
@@ -161,10 +189,11 @@ python3 system_hub.py
 ### Adjust SDR Parameters (`backend_rk3588/config.py`)
 
 ```python
-SDR_URI      = "ip:192.168.31.10"          # AD9364 network address
-SDR_GAIN_DB  = 70                           # MGC RX gain (dB); AD9364 max ≈ 73 dB
-SAMPLE_RATE  = int(40e6)                    # 40 MSps
-SWEEP_SECTORS = [5745e6, 5785e6, 5825e6]   # OcuSync 5.8 GHz band sectors
+SDR_URI           = "ip:192.168.31.10"         # AD9364 network address
+SDR_GAIN_DB       = 70                          # MGC RX gain (dB); AD9364 max ≈ 73 dB
+SAMPLE_RATE       = int(40e6)                   # 40 MSps
+SWEEP_SECTORS     = [5745e6, 5785e6, 5825e6]   # OcuSync 5.8 GHz band sectors
+YOLO_ASSIST_ENABLED = False                     # Enable after retraining on 5.8 GHz data
 ```
 
 ### (Optional) Convert YOLOv8 Weights to RKNN INT8
@@ -179,7 +208,7 @@ python tools/convert_yolo_to_rknn.py
 
 Field-validated on **2026-04-06** with PlutoSDR mock transmitter (DJI Mini 4 Pro / Mavic 3 IQ dataset) and AD9364 receiver at 70 dB MGC gain:
 
-| Event | Sector | combined NCC | Threshold | PSR | CFS | Result |
+| Event | Sector | Combined NCC | Threshold | PSR | CFS | Result |
 |-------|--------|-------------|-----------|-------|-------|--------|
 | OcuSync detected | 5785 MHz | 3.92% | 1.80% | 7.6× | 4.9× | ✅ CONFIRMED |
 | OcuSync detected (weak) | 5785 MHz | 2.02% | 1.80% | 6.0× | 5.8× | ✅ CONFIRMED |
@@ -187,5 +216,7 @@ Field-validated on **2026-04-06** with PlutoSDR mock transmitter (DJI Mini 4 Pro
 | OcuSync detected | 5825 MHz | 7.85% | 3.25% | 18.4× | 2.6× | ✅ CONFIRMED |
 | SMPS burst (α=14.4 kHz) | 5825 MHz | 9.40% | — | 2.6× | **1.06×** | ❌ Rejected (CFS) |
 | Wideband noise | 5745 MHz | 1.82% | — | **2.35×** | 1.78× | ❌ Rejected (PSR) |
+
+> **v4.0 upgrade note**: The above results were obtained with v3.x parameters. With v4.0 (CHUNK=160k, PEAK_WEIGHT=0.65, AFS guard, SDS soft floor), the weak-signal row (NCC=2.02%) now benefits from the 0.80×th soft floor path, and the SMPS/noise rejection rows are additionally guarded by AFS (σ_α check) and the stricter CFS threshold (2.0×).
 
 **Consistent detected alpha: 27.99 kHz** → corresponds to OcuSync OFDM symbol structure with CP=1/4 at 35 kHz subcarrier spacing (N_total = 1429 samples @ 40 MSps).
