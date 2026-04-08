@@ -110,10 +110,10 @@ class CentralHubEngine(QObject):
     signal_rf_frame = pyqtSignal(object)
     signal_k230_frame = pyqtSignal(object)
     signal_log = pyqtSignal(str)
-    
-    # 针对表现层的聚合状态负载
     signal_system_status = pyqtSignal(dict)
     signal_db_updated = pyqtSignal()
+    # 标定完成通知：True=成功，False=出错（两种情况均允许启动，但告知状态）
+    signal_calibration_done = pyqtSignal(bool)
     
     def __init__(self):
         super().__init__()
@@ -363,16 +363,23 @@ if __name__ == "__main__":
         hub.signal_log.emit("=" * 58)
         hub.signal_log.emit("  [RF-Vision] 正在后台执行 S3 CAF-FFT 环境底噪校准...")
         hub.signal_log.emit("  校准期间可正常操作界面，结果将实时显示于此日志框")
+        hub.signal_log.emit("  锁层警告：标定完成前「启动数据采集」按钮处于锁定状态")
         hub.signal_log.emit("=" * 58)
+        _ok = True
         try:
             from rf_zynq.calibrate_s3 import main as _calibrate
-            _calibrate()   # 内部所有 print() 已被 _redirector 捕获并实时显示
-            hub.signal_log.emit("  [RF-Vision] ✓ 底噪校准完成，新阈值已生效，系统就绪。")
+            _calibrate()
+            hub.signal_log.emit("  [RF-Vision] ✓ 底噪校准完成，新阈值已生效，「启动采集」已解锁。")
         except Exception as _e:
+            _ok = False
             hub.signal_log.emit(f"  [RF-Vision] ⚠ 校准出错: {_e}")
-            hub.signal_log.emit("  → 将使用上次保存的阈值继续运行。")
+            hub.signal_log.emit("  → 将使用上次保存的阈值，「启动采集」已释放。")
+        finally:
+            # 无论成功/失败均解锁按钮（失败时使用上次阈值仍可运行）
+            hub.signal_calibration_done.emit(_ok)
 
     threading.Thread(target=_bg_calibrate, daemon=True).start()
+
 
     # ── Step 5: 进入 Qt 主事件循环 ───────────────────────────────────────────
     exit_code = app.exec_()

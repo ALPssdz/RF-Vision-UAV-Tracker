@@ -558,6 +558,7 @@ class MainWindow(QMainWindow):
             self.hub.signal_log.connect(self.append_log)
             self.hub.signal_system_status.connect(self.update_status_labels)
             self.hub.signal_db_updated.connect(self.load_db_data)
+            self.hub.signal_calibration_done.connect(self.on_calibration_done)
 
         # ── 告警计数器 ────────────────────────────────────────────────
         self._alert_count = 0
@@ -897,9 +898,18 @@ class MainWindow(QMainWindow):
         btns.setContentsMargins(14, 4, 14, 4)
         btns.setSpacing(8)
 
-        self.btn_play = QPushButton("▶  启动数据采集")
+        self.btn_play = QPushButton("⏳  等待背景噪声标定完成...")
         self.btn_play.setObjectName("btn_start")
         self.btn_play.setMinimumHeight(48)
+        self.btn_play.setEnabled(False)   # 标定完成前锁定
+        self.btn_play.setStyleSheet("""
+            QPushButton {
+                background: #1c2336;
+                color: #475569;
+                border: 1px solid #252d45;
+                border-radius: 7px;
+            }
+        """)
         self.btn_play.clicked.connect(self.toggle_play)
 
         self.btn_exit = QPushButton("■  安全终止进程组")
@@ -1046,6 +1056,35 @@ class MainWindow(QMainWindow):
             self.btn_play.setObjectName("btn_stop")
             self.btn_play.setStyleSheet("")
             self.btn_play.setStyle(self.btn_play.style())
+
+    def on_calibration_done(self, success: bool):
+        """
+        背景噪声标定完成回调（由 signal_calibration_done 触发）。
+
+        标定成功：恢复绿色「启动数据采集」按钮，解除交互锁定。
+        标定失败：以琥珀色提示，仍解锁按钮（使用上次阈值亦可运行）。
+        """
+        self.btn_play.setEnabled(True)
+        self.btn_play.setStyleSheet("")        # 清除灰色锁定样式
+        self.btn_play.setStyle(self.btn_play.style())
+
+        if success:
+            self.btn_play.setText("▶  启动数据采集")
+            self.btn_play.setObjectName("btn_start")
+            self.btn_play.setStyleSheet("")
+        else:
+            # 标定失败时用琥珀色警示，功能仍可用
+            self.btn_play.setText("⚠  启动（阈值降级）")
+            self.btn_play.setObjectName("btn_start")
+            self.btn_play.setStyleSheet("""
+                QPushButton {
+                    background: qlineargradient(x1:0,y1:0,x2:1,y2:1,
+                        stop:0 #78350f, stop:1 #f59e0b);
+                    color: #fff8e1;
+                    border-radius: 7px;
+                }
+            """)
+        self.btn_play.setStyle(self.btn_play.style())
 
     def on_clear_db_clicked(self):
         reply = QMessageBox.question(
