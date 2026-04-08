@@ -350,7 +350,7 @@ if __name__ == "__main__":
     app = QApplication(sys.argv)
     hub = CentralHubEngine()       # 内部创建 MainWindow 及 RFToolchain
                                    # 期间的 print() 进入 _redirector 缓冲区
-    hub.ui_window.showMaximized()  # 立即显示窗口，无需等待标定完成
+    hub.ui_window.showFullScreen()  # 全屏显示，立即弹出无需等待标定完成
 
     # ── Step 3: 绑定信号，flush 缓冲区至 GUI 日志框 ───────────────────────────
     # attach_signal 调用后，已缓冲的所有初始化日志立即出现在日志框，
