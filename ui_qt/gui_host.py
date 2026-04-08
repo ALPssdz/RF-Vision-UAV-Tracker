@@ -675,9 +675,19 @@ class MainWindow(QMainWindow):
         content = QHBoxLayout()
         content.setSpacing(12)
 
+        # ----------------------------------------------------------------
+        # 重要：必须将每列 QVBoxLayout 包装进 QWidget 后再 addWidget(stretch)
+        # 原因：Qt 的 QHBoxLayout.addLayout(stretch) 在计算 minimumSize 时
+        # 会忽略子 layout 的 minimumSize 缓存失效信号，导致 Tab 切换后布局
+        # 重算时 minimumSize 叠加超出窗口宽度，触发水平溢出。
+        # 将 layout 绑定到 QWidget 后，parent HBoxLayout 通过 QWidget 的
+        # sizeHint()/minimumSizeHint() 稳定获取尺寸，彻底消除该竞争。
+        # ----------------------------------------------------------------
+
         # 左列：RF 瀑布图
         left_col = QVBoxLayout()
         left_col.setSpacing(8)
+        left_col.setContentsMargins(0, 0, 0, 0)
 
         rf_card = QFrame()
         rf_card.setObjectName("card")
@@ -689,16 +699,24 @@ class MainWindow(QMainWindow):
         rf_card_lay.addWidget(rf_hdr)
 
         self.img_rf = QLabel()
-        self.img_rf.setMinimumSize(420, 420)   # 最小尺寸保登
+        # 不设 setMinimumSize 大值：硬约束会在 Tab 切换时叠加导致溢出
+        # 改用 setMinimumSize(1,1) 让父容器的 stretch 比例自由决定分配宽度
+        self.img_rf.setMinimumSize(1, 1)
         self.img_rf.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.img_rf.setAlignment(Qt.AlignCenter)
         self.img_rf.setStyleSheet("background-color: #010205; border-radius: 0 0 12px 12px;")
         rf_card_lay.addWidget(self.img_rf, stretch=1)
         left_col.addWidget(rf_card, stretch=1)
 
+        # 包装进 QWidget，使 stretch 正确传递 sizeHint
+        left_w = QWidget()
+        left_w.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        left_w.setLayout(left_col)
+
         # 中列：K230 视频
         mid_col = QVBoxLayout()
         mid_col.setSpacing(8)
+        mid_col.setContentsMargins(0, 0, 0, 0)
 
         k230_card = QFrame()
         k230_card.setObjectName("card")
@@ -709,25 +727,35 @@ class MainWindow(QMainWindow):
         k230_card_lay.addWidget(k230_hdr)
 
         self.img_k230 = QLabel()
-        self.img_k230.setMinimumSize(640, 480)
+        self.img_k230.setMinimumSize(1, 1)   # 同上，不设大值约束
         self.img_k230.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.img_k230.setAlignment(Qt.AlignCenter)
         self.img_k230.setStyleSheet("background-color: #010205; border-radius: 0 0 12px 12px;")
         k230_card_lay.addWidget(self.img_k230, stretch=1)
         mid_col.addWidget(k230_card, stretch=1)
 
+        mid_w = QWidget()
+        mid_w.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        mid_w.setLayout(mid_col)
+
         # 右列：香橙派系统监控面板 + 控制按钮
+        # setFixedWidth(280) 直接约束 QWidget，让右列精确占 280px 不参与 stretch
         right_col = QVBoxLayout()
         right_col.setSpacing(10)
+        right_col.setContentsMargins(0, 0, 0, 0)
         right_col.addWidget(self._build_opi_monitor_panel())
         right_col.addWidget(self._build_control_panel())
         right_col.addStretch()
 
-        # 三列 stretch 比例：RF 列 : K230 列 : 右侧控制列 = 3 : 4 : 固定260
-        # 在 1080P 全屏（1920宽）：RF列约 660px、K230列约 880px、右列 280px
-        content.addLayout(left_col, stretch=3)
-        content.addLayout(mid_col,  stretch=4)
-        content.addLayout(right_col)
+        right_w = QWidget()
+        right_w.setFixedWidth(280)
+        right_w.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
+        right_w.setLayout(right_col)
+
+        # stretch 3 : 4 : 固定280 — 1920px 全屏约：RF≈630px K230≈840px 右280px
+        content.addWidget(left_w,  stretch=3)
+        content.addWidget(mid_w,   stretch=4)
+        content.addWidget(right_w)
         root.addLayout(content, stretch=1)
 
         # ── 底部日志区 ─────────────────────────────────────────────────
@@ -1035,7 +1063,14 @@ class MainWindow(QMainWindow):
         self.db_img_label.setText(f"已清除 {n} 条告警记录及关联图片。")
 
     def on_tab_changed(self, index: int):
-        if index == 1:
+        if index == 0:
+            # Tab 切换回监测数据流时，强制 Tab1 布局重新计算
+            # 原因：Tab 隐藏期间 layout minimumSize 缓存可能失效，
+            # 显式 invalidate + updateGeometry 让 Qt 重新从叶节点向上聚合尺寸
+            self.tab1.layout().invalidate()
+            self.tab1.updateGeometry()
+            self.tab1.update()
+        elif index == 1:
             self.load_db_data()
 
     def load_db_data(self):
