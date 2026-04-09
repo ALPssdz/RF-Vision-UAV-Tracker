@@ -46,11 +46,12 @@ IQ Samples (AD9364, 40 MSps, 2.62M samples/burst)
         │
         ▼
   Stage 2 — Spectrogram + YOLOv8 (S2)
-    STFT waterfall image (640×640, HOT colormap).
-    YOLOv8n inference on RK3588 NPU via RKNN (~30 ms).
-    bbox_score forwarded to alert_info for optional SDS injection.
-    [Note: YOLO assist injection is OFF by default until the model
-     is retrained on 5.8 GHz waterfall data. See config.py.]
+    STFT waterfall image (640×640, VIRIDIS colormap, Blackman window).
+    YOLOv8n inference on RK3588 NPU via RKNN FP16 (~30 ms).
+    bbox_score forwarded to alert_info for SDS injection.
+    Model trained on RFUAV IQ dataset (131 recordings, 5 drone models,
+    resampled to 40 MSps) with synthetic AWGN negatives.
+    Training mAP@0.5 = 0.995; live SDR confidence ≈ 0.2–0.7 (domain shift).
         │
         ▼
   Stage 3 — Cyclic Frequency Discriminator v4.0 (S3)
@@ -135,7 +136,7 @@ Differing from conventional Boolean AND-logic fusion, this system implements ind
 
 1.  **RF Trigger (Primary)** — S3 SDS discriminator confirms OcuSync protocol fingerprint through four orthogonal verifications and fires an alert with a cyclic spectrum snapshot.
 2.  **Visual Trigger (Secondary)** — K230 UDP telemetry independently triggers an alert, compensating for UAVs under RF silence or traversing the antenna null.
-3.  **YOLO Assist (Optional, disabled by default)** — Once retrained on 5.8 GHz waterfall data (`YOLO_ASSIST_ENABLED = True` in config.py), S2 bbox_score injects +0.15 into the SDS score for weak-signal rescue when S3 SDS ∈ [0.85, 1.00).
+3.  **YOLO Assist (Enabled)** — Trained on 5.8 GHz RFUAV waterfall data (`YOLO_ASSIST_ENABLED = True` in config.py). S2 bbox_score injects +0.15 into the SDS score for weak-signal rescue when S3 SDS ∈ [0.85, 1.00).
 
 Both primary trigger paths produce a fused composite evidence image (RF waterfall + optical frame) stored in the SQLite3 alert database.
 
@@ -153,7 +154,7 @@ RF-Vision-UAV-Tracker/
 │   ├── rf_stage3_cyclostationary.py # S3: CAF-FFT + AFS + SDS discriminator (v4.0)
 │   ├── calibrate_s3.py              # S3 autonomous field calibration wizard
 │   ├── s3_thresholds.json           # Runtime thresholds (git-ignored, auto-generated)
-│   └── rknn_infer.py                # RKNN-Lite2 YOLOv8 NPU inference wrapper
+│   └── rknn_infer.py                # RKNN-Lite2 YOLOv8 NPU inference wrapper (torch-free)
 ├── vision_k230/
 │   └── k230_client.py               # RTSP video + UDP telemetry network client
 ├── ui_qt/
@@ -161,7 +162,8 @@ RF-Vision-UAV-Tracker/
 ├── database/
 │   └── db_manager.py                # SQLite3 alert persistence & LRU management
 ├── tools/
-│   └── convert_yolo_to_rknn.py      # YOLOv8 → RKNN INT8 offline converter
+│   ├── build_and_train_yolo.py      # IQ → VIRIDIS waterfall dataset + YOLOv8 training
+│   └── convert_yolo_to_rknn.py      # YOLOv8 → RKNN FP16 offline converter
 ├── mock_transmitter/
 │   ├── uav_tx_gui.py                # PlutoSDR UAV RF target simulator GUI
 │   │                                  Supports: DJI Mini 4 Pro / Mavic 3 / Avata 2 /
@@ -193,16 +195,30 @@ SDR_URI           = "ip:192.168.31.10"         # AD9364 network address
 SDR_GAIN_DB       = 70                          # MGC RX gain (dB); AD9364 max ≈ 73 dB
 SAMPLE_RATE       = int(40e6)                   # 40 MSps
 SWEEP_SECTORS     = [5745e6, 5785e6, 5825e6]   # OcuSync 5.8 GHz band sectors
-YOLO_ASSIST_ENABLED = False                     # Enable after retraining on 5.8 GHz data
+YOLO_ASSIST_ENABLED = True                      # Trained on RFUAV 5.8 GHz waterfall dataset
+YOLO_CONF_THRESH  = 0.30                        # Adjusted for domain shift (RFUAV → live SDR)
 ```
 
-### (Optional) Convert YOLOv8 Weights to RKNN INT8
+### Build YOLO Dataset & Train (Optional — pre-trained weights included)
 
-Run on **x86 Linux / WSL2**, then copy `best.rknn` to the Orange Pi:
+```bash
+# Generate VIRIDIS waterfall images from RFUAV IQ recordings + train YOLOv8n
+python tools/build_and_train_yolo.py
+
+# Skip dataset generation if already built
+python tools/build_and_train_yolo.py --skip-gen
+```
+
+### Convert YOLOv8 Weights to RKNN FP16
+
+Run on **x86 Linux / WSL2** (requires `rknn-toolkit2`), then copy `best.rknn` to the Orange Pi:
 
 ```bash
 python tools/convert_yolo_to_rknn.py
+scp rf_zynq/yolo/best.rknn orangepi@<IP>:/opt/RF-Vision-UAV-Tracker/rf_zynq/yolo/
 ```
+
+> **Note**: INT8 quantization destroys YOLOv8 class confidence. The converter uses **FP16 mode** (`do_quantization=False`), which preserves full accuracy with only ~30% slower NPU inference vs INT8.
 
 ## 8. Validated Detection Performance
 
