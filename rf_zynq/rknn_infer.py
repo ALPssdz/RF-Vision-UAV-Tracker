@@ -54,6 +54,11 @@ def _letterbox(img: np.ndarray, target_size: int = 640):
     return padded, ratio, pad_left, pad_top
 
 
+def _sigmoid(x):
+    """数值稳定的 sigmoid：1 / (1 + exp(-x))"""
+    return 1.0 / (1.0 + np.exp(-np.clip(x, -50, 50)))
+
+
 def _decode_yolov8_output(outputs: list, conf_thresh: float,
                            orig_h: int, orig_w: int,
                            ratio: float, pad_left: int, pad_top: int) -> list:
@@ -62,7 +67,14 @@ def _decode_yolov8_output(outputs: list, conf_thresh: float,
 
     YOLOv8 输出格式（单类检测，经 ONNX 导出后）：
       outputs[0].shape = (1, 5 + num_classes, num_anchors)
-      其中前 4 个通道为 cx, cy, w, h（相对 640×640 的归一化坐标乘以 640）
+      其中前 4 个通道为 cx, cy, w, h（相对 640×640）
+      后续通道为各类别 logit（未经 sigmoid）
+
+    INT8 量化说明：
+      RKNN 转换时将输入/输出从 float32 转为 int8。
+      rknn_toolkit_lite2 的 inference() 默认返回反量化后的 float32 值，
+      但 YOLOv8 的类别输出是 raw logit（未经 sigmoid），
+      需手动应用 sigmoid 变换获得 [0, 1] 范围的置信度。
 
     Returns
     -------
@@ -70,17 +82,27 @@ def _decode_yolov8_output(outputs: list, conf_thresh: float,
     bbox 坐标为原始图像像素坐标
     """
     results = []
-    preds = outputs[0]
+    preds = outputs[0].astype(np.float32)
     if preds.ndim == 3:
         preds = preds[0]         # (5+nc, anchors)
     preds = preds.T              # (anchors, 5+nc)
 
-    for pred in preds:
-        cx, cy, bw, bh = pred[0], pred[1], pred[2], pred[3]
-        class_scores = pred[4:]
-        conf = float(np.max(class_scores))
-        if conf < conf_thresh:
-            continue
+    # 提取坐标和类别 logit
+    boxes_xywh   = preds[:, :4]                # (anchors, 4) — cx, cy, w, h
+    class_logits = preds[:, 4:]                # (anchors, nc) — raw logit
+
+    # ── 类别置信度：sigmoid(logit) ──
+    class_conf = _sigmoid(class_logits)        # (anchors, nc) → [0, 1]
+    max_conf   = np.max(class_conf, axis=1)    # (anchors,)
+
+    # 快速筛选：仅处理超过阈值的锚点
+    mask = max_conf >= conf_thresh
+    if not np.any(mask):
+        return results
+
+    for idx in np.where(mask)[0]:
+        cx, cy, bw, bh = boxes_xywh[idx]
+        conf = float(max_conf[idx])
 
         # 还原至原始图像坐标
         x1 = int((cx - bw / 2 - pad_left) / ratio)
